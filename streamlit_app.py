@@ -60,19 +60,22 @@ def main():
     with st.sidebar:
         st.header("📋 Datos del Expediente")
         
+        # Botón para limpiar todo
         if st.button("Nueva Liquidación", type="primary", use_container_width=True):
-            st.session_state.clear()
+            # Borramos absolutamente todo el estado
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
             st.rerun()
             
-        caratula = st.text_input("Carátula / Expediente", value="García c/ Pérez s/ Despido", key="caratula")
+        caratula = st.text_input("Carátula / Expediente", value="", placeholder="Ej: García c/ Pérez s/ Despido", key="caratula")
         
         col1, col2 = st.columns(2)
         with col1:
-            f_ingreso = st.date_input("Fecha Ingreso", value=date(2020, 1, 1), min_value=date(1950, 1, 1), max_value=date(2100, 12, 31), format="DD/MM/YYYY", key="f_ingreso")
+            f_ingreso = st.date_input("Fecha Ingreso", value=date.today(), min_value=date(1950, 1, 1), max_value=date(2100, 12, 31), format="DD/MM/YYYY", key="f_ingreso")
         with col2:
             f_despido = st.date_input("Fecha Despido", value=date.today(), min_value=date(1950, 1, 1), max_value=date(2100, 12, 31), format="DD/MM/YYYY", key="f_despido")
             
-        sueldo = st.number_input("Mejor Remuneración ($)", min_value=0.0, value=100000.0, step=1000.0, format="%.2f", key="sueldo")
+        sueldo = st.number_input("Mejor Remuneración ($)", min_value=0.0, value=0.0, step=1000.0, format="%.2f", key="sueldo")
         
         st.subheader("Configuración")
         causa = st.selectbox("Causa de Extinción", ["Sin Causa", "Con causa / Renuncia", "Mutuo Acuerdo"], key="causa")
@@ -104,7 +107,7 @@ def main():
                      remu_calculo = sueldo
                      st.caption(f"Base: ${remu_calculo:,.2f}")
                  else:
-                     remu_calculo = st.number_input("Remuneración Específica ($)", value=sueldo, min_value=0.0, key="remu_calculo")
+                     remu_calculo = st.number_input("Remuneración Específica ($)", value=0.0, min_value=0.0, key="remu_calculo")
             
             if cant_meses_adeudados > 0:
                 total_sal_adeudados = remu_calculo * cant_meses_adeudados
