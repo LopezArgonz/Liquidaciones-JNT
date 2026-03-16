@@ -47,30 +47,34 @@ def main():
     with st.sidebar:
         st.header("📋 Datos del Expediente")
         
-        caratula = st.text_input("Carátula / Expediente", value="García c/ Pérez s/ Despido")
+        if st.button("🔄 Nueva Liquidación (Borrar todo)", type="primary", use_container_width=True):
+            st.session_state.clear()
+            st.rerun()
+            
+        caratula = st.text_input("Carátula / Expediente", value="García c/ Pérez s/ Despido", key="caratula")
         
         col1, col2 = st.columns(2)
         with col1:
-            f_ingreso = st.date_input("Fecha Ingreso", value=date(2020, 1, 1), min_value=date(1950, 1, 1), max_value=date(2100, 12, 31), format="DD/MM/YYYY")
+            f_ingreso = st.date_input("Fecha Ingreso", value=date(2020, 1, 1), min_value=date(1950, 1, 1), max_value=date(2100, 12, 31), format="DD/MM/YYYY", key="f_ingreso")
         with col2:
-            f_despido = st.date_input("Fecha Despido", value=date.today(), min_value=date(1950, 1, 1), max_value=date(2100, 12, 31), format="DD/MM/YYYY")
+            f_despido = st.date_input("Fecha Despido", value=date.today(), min_value=date(1950, 1, 1), max_value=date(2100, 12, 31), format="DD/MM/YYYY", key="f_despido")
             
-        sueldo = st.number_input("Mejor Remuneración ($)", min_value=0.0, value=100000.0, step=1000.0, format="%.2f")
+        sueldo = st.number_input("Mejor Remuneración ($)", min_value=0.0, value=100000.0, step=1000.0, format="%.2f", key="sueldo")
         
         st.subheader("Configuración")
-        causa = st.selectbox("Causa de Extinción", ["Sin Causa", "Con causa / Renuncia", "Mutuo Acuerdo"])
+        causa = st.selectbox("Causa de Extinción", ["Sin Causa", "Con causa / Renuncia", "Mutuo Acuerdo"], key="causa")
         
-        fuente_ipc = st.radio("Fuente de Actualización", ["INDEC", "CABA", "TIM BCRA"], index=0)
+        fuente_ipc = st.radio("Fuente de Actualización", ["INDEC", "CABA", "TIM BCRA"], index=0, key="fuente_ipc")
         
         st.markdown("##### Multas Ley 25.323")
-        art1 = st.checkbox("Art. 1 (Relación no registrada)", value=False)
-        art2 = st.checkbox("Art. 2 (Falta de pago)", value=False)
+        art1 = st.checkbox("Art. 1 (Relación no registrada)", value=False, key="art1")
+        art2 = st.checkbox("Art. 2 (Falta de pago)", value=False, key="art2")
         
         st.markdown("##### Fallo Vizzoti")
-        aplicar_vizzoti = st.checkbox("Aplicar Tope / Fallo Vizzoti", value=False)
+        aplicar_vizzoti = st.checkbox("Aplicar Tope / Fallo Vizzoti", value=False, key="aplicar_vizzoti")
         tope_cct = 0.0
         if aplicar_vizzoti:
-             tope_cct = st.number_input("Monto Tope Convencional ($)", min_value=0.0, value=0.0, step=1000.0, format="%.2f")
+             tope_cct = st.number_input("Monto Tope Convencional ($)", min_value=0.0, value=0.0, step=1000.0, format="%.2f", key="tope_cct")
         
         st.markdown("##### Rubros Adicionales")
         
@@ -80,14 +84,14 @@ def main():
         with st.expander("Salarios Adeudados (Predeterminado)"):
             c_sal1, c_sal2 = st.columns(2)
             with c_sal1:
-                 cant_meses_adeudados = st.number_input("Cantidad de Meses Adeudados", min_value=0, step=1, format="%d")
+                 cant_meses_adeudados = st.number_input("Cantidad de Meses Adeudados", min_value=0, step=1, format="%d", key="cant_meses")
             with c_sal2:
-                 usar_mrmnh = st.checkbox("Utilizar MRMNH", value=True, help="Usa la Mejor Remuneración ingresada arriba")
+                 usar_mrmnh = st.checkbox("Utilizar MRMNH", value=True, help="Usa la Mejor Remuneración ingresada arriba", key="usar_mrmnh")
                  if usar_mrmnh:
                      remu_calculo = sueldo
                      st.caption(f"Base: ${remu_calculo:,.2f}")
                  else:
-                     remu_calculo = st.number_input("Remuneración Específica ($)", value=sueldo, min_value=0.0)
+                     remu_calculo = st.number_input("Remuneración Específica ($)", value=sueldo, min_value=0.0, key="remu_calculo")
             
             if cant_meses_adeudados > 0:
                 total_sal_adeudados = remu_calculo * cant_meses_adeudados
@@ -97,7 +101,7 @@ def main():
         # 2. Otros Rubros (Tabla)
         with st.expander("Otros Rubros Extras"):
             df_adicionales = pd.DataFrame(columns=["Concepto", "Monto"])
-            edited_df = st.data_editor(df_adicionales, num_rows="dynamic", use_container_width=True)
+            edited_df = st.data_editor(df_adicionales, num_rows="dynamic", use_container_width=True, key="df_adicionales")
             # Convertir a lista de tuplas (Concepto, Monto) validando que haya datos
             for index, row in edited_df.iterrows():
                 if row["Concepto"] and row["Monto"]:
