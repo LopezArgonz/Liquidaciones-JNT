@@ -327,18 +327,19 @@ def main():
                     border-collapse: collapse !important;
                     font-family: sans-serif;
                     font-size: 0.9rem;
+                    color: inherit;
                 }
                 .table-style thead tr th {
                     text-align: center !important;
-                    background-color: #f0f2f6;
+                    background-color: rgba(128, 128, 128, 0.1);
                     padding: 8px;
-                    border-bottom: 2px solid #ddd;
-                    color: #31333F;
+                    border-bottom: 2px solid rgba(128, 128, 128, 0.2);
+                    color: inherit;
                 }
                 .table-style tbody tr td {
                     padding: 8px;
-                    border-bottom: 1px solid #eee;
-                    color: #31333F;
+                    border-bottom: 1px solid rgba(128, 128, 128, 0.1);
+                    color: inherit;
                 }
                 /* Alinear segunda columna (Monto) a la derecha */
                 .table-style tbody tr td:nth-child(2) {
@@ -348,8 +349,8 @@ def main():
                 /* Negrita para la última fila (Total) */
                 .table-style tbody tr:last-child {
                     font-weight: bold;
-                    background-color: #f9f9f9;
-                    border-top: 2px solid #ddd;
+                    background-color: rgba(128, 128, 128, 0.05);
+                    border-top: 2px solid rgba(128, 128, 128, 0.2);
                 }
                 </style>
                 """, unsafe_allow_html=True)
