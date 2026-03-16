@@ -6,7 +6,7 @@ from app_liquidacion import LiquidadorLaboral, obtener_datos_online
 
 # Configuración de la página
 st.set_page_config(
-    page_title="Liquidador Laboral - Tribunal",
+    page_title="Liquidaciones JNT",
     page_icon="logo.png",
     layout="wide",
     initial_sidebar_state="expanded"
