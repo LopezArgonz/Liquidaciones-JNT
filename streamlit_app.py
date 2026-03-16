@@ -22,10 +22,23 @@ st.markdown("""
         color: #2c3e50;
     }
     .stButton>button {
-        background-color: #2980b9;
+        background-color: #2c3e50;
         color: white;
-        border-radius: 5px;
+        border-radius: 8px;
         width: 100%;
+        border: none;
+        padding: 0.5rem 1rem;
+        font-weight: 500;
+        transition: all 0.3s ease;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .stButton>button:hover {
+        background-color: #34495e;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        transform: translateY(-1px);
+    }
+    .stButton>button:active {
+        transform: translateY(0px);
     }
     .css-1d391kg {
         padding-top: 2rem;
@@ -47,7 +60,7 @@ def main():
     with st.sidebar:
         st.header("📋 Datos del Expediente")
         
-        if st.button("🔄 Nueva Liquidación (Borrar todo)", type="primary", use_container_width=True):
+        if st.button("Nueva Liquidación", type="primary", use_container_width=True):
             st.session_state.clear()
             st.rerun()
             
@@ -319,7 +332,7 @@ def main():
                 # HTML base
                 html = df_final.to_html(index=False, classes='table-style', border=0, justify='center')
                 
-                # CSS Personalizado para que se vea bien
+                # CSS Personalizado para que se vea bien en ambos modos
                 st.markdown("""
                 <style>
                 .table-style {
@@ -327,30 +340,30 @@ def main():
                     border-collapse: collapse !important;
                     font-family: sans-serif;
                     font-size: 0.9rem;
-                    color: inherit;
+                    color: inherit !important;
                 }
                 .table-style thead tr th {
                     text-align: center !important;
-                    background-color: rgba(128, 128, 128, 0.1);
-                    padding: 8px;
-                    border-bottom: 2px solid rgba(128, 128, 128, 0.2);
-                    color: inherit;
+                    background-color: rgba(128, 128, 128, 0.15);
+                    padding: 10px;
+                    border-bottom: 2px solid rgba(128, 128, 128, 0.3);
+                    color: inherit !important;
                 }
                 .table-style tbody tr td {
-                    padding: 8px;
+                    padding: 10px;
                     border-bottom: 1px solid rgba(128, 128, 128, 0.1);
-                    color: inherit;
+                    color: inherit !important;
                 }
                 /* Alinear segunda columna (Monto) a la derecha */
                 .table-style tbody tr td:nth-child(2) {
                     text-align: right !important;
                     white-space: nowrap;
                 }
-                /* Negrita para la última fila (Total) */
+                /* Estilo para la fila de Total */
                 .table-style tbody tr:last-child {
                     font-weight: bold;
-                    background-color: rgba(128, 128, 128, 0.05);
-                    border-top: 2px solid rgba(128, 128, 128, 0.2);
+                    background-color: rgba(128, 128, 128, 0.1);
+                    border-top: 2px solid rgba(128, 128, 128, 0.3);
                 }
                 </style>
                 """, unsafe_allow_html=True)
