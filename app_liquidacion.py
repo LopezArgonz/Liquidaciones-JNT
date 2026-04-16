@@ -8,26 +8,28 @@ import requests
 import io
 
 class LiquidadorLaboral:
-    def __init__(self, caratula, ingreso, despido, sueldo, causa="Sin Causa", art1=False, art2=False, ipc_inicio=1.0, ipc_fin=1.0, fuente_ipc="INDEC", tasa_tim=0.0, aplicar_vizzoti=False, tope_cct=None, rubros_adicionales=None, fecha_capitalizacion=None, tasa_tim_2=0.0):
+    def __init__(self, caratula, ingreso, despido, sueldo, causa="Sin Causa", art1=False, art2=False, ipc_inicio=1.0, ipc_fin=1.0, aplicar_vizzoti=False, tope_cct=None, rubros_adicionales=None, fecha_liquidacion=None, incluir_sac_anterior=False, art80=False, dto34=False):
         self.caratula = caratula
         self.ingreso = datetime.strptime(ingreso, "%d/%m/%Y")
         self.despido = datetime.strptime(despido, "%d/%m/%Y")
+        if fecha_liquidacion:
+            self.hoy = datetime.strptime(fecha_liquidacion, "%d/%m/%Y")
+        else:
+            self.hoy = datetime.now()
         self.sueldo = sueldo
         self.causa = causa
         self.art1 = art1
         self.art2 = art2
+        self.art80 = art80
+        self.dto34 = dto34
         self.ipc_inicio = ipc_inicio
         self.ipc_fin = ipc_fin
-        self.fuente_ipc = fuente_ipc
-        self.tasa_tim = tasa_tim
-        self.tasa_tim_2 = tasa_tim_2 # Tasa desde capitalización hasta hoy
-        self.fecha_capitalizacion = fecha_capitalizacion # Fecha de corte para capitalizar
         self.aplicar_vizzoti = aplicar_vizzoti
         self.tope_cct = tope_cct
         self.rubros_adicionales = rubros_adicionales if rubros_adicionales else []
+        self.incluir_sac_anterior = incluir_sac_anterior
 
         self.antiguedad = relativedelta(self.despido, self.ingreso)
-        self.hoy = datetime.now()
 
     def calcular_periodos_245(self):
         anios = self.antiguedad.years
@@ -56,17 +58,43 @@ class LiquidadorLaboral:
         dias_faltantes = ultimo_dia - self.despido.day
         return (self.sueldo / 30) * dias_faltantes if self.causa == "Sin Causa" else 0
 
+    def calcular_sac_semestre_anterior(self):
+        """Si se marca la opción, calcula el SAC adeudado del semestre anterior (Enero o Julio)."""
+        if self.incluir_sac_anterior and self.despido.month in (1, 7):
+            if self.despido.month == 7:
+                inicio_sem_ant = datetime(self.despido.year, 1, 1)
+                fin_sem_ant = datetime(self.despido.year, 6, 30)
+            else:
+                inicio_sem_ant = datetime(self.despido.year - 1, 7, 1)
+                fin_sem_ant = datetime(self.despido.year - 1, 12, 31)
+            
+            if self.ingreso > fin_sem_ant:
+                return 0.0
+                
+            if self.ingreso <= inicio_sem_ant:
+                return self.sueldo / 2
+                
+            fecha_inicio = max(inicio_sem_ant, self.ingreso)
+            dias = (fin_sem_ant - fecha_inicio).days + 1
+            return (self.sueldo / 365) * dias
+        return 0.0
+
     def calcular_sac_prop(self):
         inicio_sem = datetime(self.despido.year, 1, 1) if self.despido.month <= 6 else datetime(self.despido.year, 7, 1)
-        dias = (self.despido - inicio_sem).days + 1
-        return (self.sueldo / 2) * (dias / 182)
+        fecha_inicio_calculo = max(inicio_sem, self.ingreso)
+        dias = (self.despido - fecha_inicio_calculo).days + 1
+        return (self.sueldo / 365) * dias
 
     def calcular_vacaciones_prop(self):
-        anios = self.antiguedad.years
+        fecha_fin_anio = datetime(self.despido.year, 12, 31)
+        antiguedad_al_31_dic = relativedelta(fecha_fin_anio, self.ingreso)
+        anios = antiguedad_al_31_dic.years
         escala = 14 if anios < 5 else 21 if anios < 10 else 28 if anios < 20 else 35
-        dias_anio = (self.despido - datetime(self.despido.year, 1, 1)).days + 1
-        monto_vac = (dias_anio / 365) * escala * (self.sueldo / 25)
-        return monto_vac * 1.0833
+        fecha_inicio_anio = max(datetime(self.despido.year, 1, 1), self.ingreso)
+        dias_anio = (self.despido - fecha_inicio_anio).days + 1
+        proporcional_dias = (escala * dias_anio / 365)
+        monto_vac = (self.sueldo / 25) * proporcional_dias
+        return monto_vac, proporcional_dias
 
     def calcular_dias_trabajados_mes_despido(self):
         """Calcula el proporcional de días trabajados en el mes del despido"""
@@ -92,17 +120,16 @@ class LiquidadorLaboral:
         fmt_mon = workbook.add_format({'num_format': '$#,##0.00', 'border': 1})
         fmt_txt = workbook.add_format({'border': 1})
         fmt_bold = workbook.add_format({'bold': True, 'border': 1})
-        fmt_int = workbook.add_format({'bold': True, 'bg_color': '#EBF1DE', 'border': 1})
+        fmt_int = workbook.add_format({'bold': True, 'bg_color': '#EBF1DE', 'border': 1, 'num_format': '$#,##0.00'})
 
         ws.set_column('A:A', 50); ws.set_column('B:B', 25)
 
         ws.write('A1', 'EXPEDIENTE:', fmt_bold); ws.write('B1', self.caratula, fmt_txt)
         ws.write('A2', 'FECHA DE DESPIDO:', fmt_bold); ws.write('B2', self.despido.strftime("%d/%m/%Y"), fmt_txt)
+        ws.write('A3', 'FECHA DE LIQUIDACIÓN:', fmt_bold); ws.write('B3', self.hoy.strftime("%d/%m/%Y"), fmt_txt)
+        ws.write('A4', 'MÉTODO ACTUALIZACIÓN:', fmt_bold); ws.write('B4', "IPC INDEC + 3% Anual", fmt_txt)
         
-        metodo_act = f"IPC {self.fuente_ipc} + 3% Anual" if self.fuente_ipc != "TIM BCRA" else f"Tasa TIM BCRA ({self.tasa_tim}%)"
-        ws.write('A3', 'MÉTODO ACTUALIZACIÓN:', fmt_bold); ws.write('B3', metodo_act, fmt_txt)
-        
-        ws.write('A5', 'RUBRO (VALORES HISTÓRICOS)', fmt_tit); ws.write('B5', 'MONTO', fmt_tit)
+        ws.write('A6', 'RUBRO (VALORES HISTÓRICOS)', fmt_tit); ws.write('B6', 'MONTO', fmt_tit)
 
         rubros = []
         total_historico = 0.0
@@ -111,263 +138,191 @@ class LiquidadorLaboral:
         monto_preaviso = 0.0
         monto_integracion = 0.0
 
-        # Rubro: Días trabajados (mes despido) - SE CALCULA SIEMPRE
-        monto_dias_trabajados = self.calcular_dias_trabajados_mes_despido()
-        rubros.append((f"Días trabajados mes despido ({self.despido.day} días)", monto_dias_trabajados))
-        total_historico += monto_dias_trabajados
-
+        # 1. Indemnización por antigüedad (art. 245 LCT)
         if self.causa == "Sin Causa":
             periodos = self.calcular_periodos_245()
             base_indemnizatoria = self.calcular_base_245()
-            
             monto_245 = base_indemnizatoria * periodos
-            monto_245 = base_indemnizatoria * periodos
-            label_245 = f"Indemnización por antigüedad (art. 245 LCT cfr. tope \"Vizzoti\" CSJN) ({periodos} años)" if self.aplicar_vizzoti else f"Indemnización por antigüedad (art. 245 LCT) ({periodos} años)"
+            label_245 = f"Indemnización por antigüedad (art. 245 LCT) ({periodos} años)"
+            if self.aplicar_vizzoti:
+                label_245 = f"Indemnización por antigüedad (art. 245 LCT cfr. tope \"Vizzoti\" CSJN) ({periodos} años)"
             rubros.append([label_245, monto_245])
             total_historico += monto_245
-            
-            # Preaviso
+
+            # 2. Indemnización sustitutiva del preaviso (art. 232 LCT)
             meses_preaviso = 2 if self.antiguedad.years >= 5 else 1
             monto_preaviso = self.sueldo * meses_preaviso
             rubros.append([f"Indemnización sustitutiva del preaviso (art. 232 LCT) ({meses_preaviso} mes/es)", monto_preaviso])
             total_historico += monto_preaviso
 
-            # SAC sobre Preaviso
+            # 3. SAC sobre preaviso
             sac_preaviso = monto_preaviso / 12
             rubros.append(["SAC sobre preaviso", sac_preaviso])
             total_historico += sac_preaviso
 
-            # Integración Mes de Despido
+            # 4. Integración del mes de despido (art. 233 LCT)
             monto_integracion = self.calcular_integracion_mes()
-            rubros.append(["Integración del mes de despido (art. 233 LCT)", monto_integracion])
-            total_historico += monto_integracion
+            if monto_integracion > 0:
+                rubros.append(["Integración del mes de despido (art. 233 LCT)", monto_integracion])
+                total_historico += monto_integracion
 
-            # SAC sobre Integración
-            sac_integracion = monto_integracion / 12
-            rubros.append(["SAC sobre integración", sac_integracion])
-            total_historico += sac_integracion
+                # 5. SAC sobre integración
+                sac_integracion = monto_integracion / 12
+                rubros.append(["SAC sobre integración", sac_integracion])
+                total_historico += sac_integracion
+
+            # Dto. 34/2019 (Doble Indemnización)
+            if self.dto34:
+                monto_dto34 = monto_245 + monto_preaviso + sac_preaviso + monto_integracion + (monto_integracion / 12 if monto_integracion > 0 else 0)
+                rubros.append(["Incremento Indemnizatorio Dto. 34/2019", monto_dto34])
+                total_historico += monto_dto34
         
-        # Multas (Base de cálculo suele ser sobre la indemnización o sueldos dependiendo el criterio,
-        # simplificado aquí usando la misma base o sueldo según corresponda, usualmente es sobre el 245)
-        # Art 1 Ley 25323: Igual a la indemnización por antigüedad
+        # 6. Días trabajados mes despido
+        monto_dias_trabajados = self.calcular_dias_trabajados_mes_despido()
+        rubros.append((f"Días trabajados mes despido ({self.despido.day} días)", monto_dias_trabajados))
+        total_historico += monto_dias_trabajados
+
+        # SAC Semestre Anterior (opcional)
+        sac_ant = self.calcular_sac_semestre_anterior()
+        if sac_ant > 0:
+            rubros.append(["SAC Semestre Anterior Adeudado", sac_ant])
+            total_historico += sac_ant
+
+        # 7. SAC Prop.
+        sac_proporcional = self.calcular_sac_prop()
+        rubros.append(["SAC Proporcional", sac_proporcional])
+        total_historico += sac_proporcional
+
+        # 8. Vacaciones Prop.
+        vacaciones_proporcionales, vac_dias = self.calcular_vacaciones_prop()
+        rubros.append([f"Vacaciones Prop. ({vac_dias:.2f} días)", vacaciones_proporcionales])
+        total_historico += vacaciones_proporcionales
+
+        # 9. SAC s/ vacaciones
+        sac_vacaciones = vacaciones_proporcionales / 12
+        rubros.append(["SAC s/ vacaciones", sac_vacaciones])
+        total_historico += sac_vacaciones
+
+        # 10. Salarios adeudados (Rubros Adicionales Predeterminados s/ la lista del usuario)
+        # Separamos los rubros adicionales para mantener el orden solicitado: Salarios adeudados antes que multas
+        otros_extras = []
+        if self.rubros_adicionales:
+            for concepto, monto in self.rubros_adicionales:
+                if "Salarios adeudados" in concepto:
+                    rubros.append([concepto, float(monto)])
+                    total_historico += float(monto)
+                else:
+                    otros_extras.append([concepto, float(monto)])
+
+        # 11. Art. 1º Ley 25.323
         if self.art1: 
              monto_art1 = monto_245 
              rubros.append(["Art. 1º Ley 25.323", monto_art1])
              total_historico += monto_art1
 
-        # Art 2 Ley 25323: 50% de (Antigüedad + Preaviso + Integración)
+        # 12. Art. 2º Ley 25.323: 50% de (Antigüedad + Preaviso + Integración)
         if self.art2:
             base_multa = monto_245 + monto_preaviso + monto_integracion
             monto_art2 = base_multa * 0.5
             rubros.append(["Art. 2º Ley 25.323", monto_art2])
             total_historico += monto_art2
 
-        # SAC Proporcional
-        sac_proporcional = self.calcular_sac_prop()
-        rubros.append(["SAC Proporcional", sac_proporcional])
-        total_historico += sac_proporcional
+        # 13. Art. 80 LCT
+        if self.art80:
+            monto_art80 = self.sueldo * 3
+            rubros.append(["Multa Art. 80 LCT", monto_art80])
+            total_historico += monto_art80
 
-        # Vacaciones Proporcionales
-        vacaciones_proporcionales = self.calcular_vacaciones_prop()
-        rubros.append(["Vacaciones Proporcionales (c/ SAC)", vacaciones_proporcionales])
-        total_historico += vacaciones_proporcionales
+        # Resto de rubros adicionales
+        for concepto, monto in otros_extras:
+            rubros.append([concepto, monto])
+            total_historico += monto
 
-        # Rubros Adicionales
-        if self.rubros_adicionales:
-            for concepto, monto in self.rubros_adicionales:
-                rubros.append([concepto, float(monto)])
-                total_historico += float(monto)
-
-        row = 6
+        row = 7
         for lab, mon in rubros:
             ws.write(row, 0, lab, fmt_txt); ws.write(row, 1, mon, fmt_mon)
             row += 1
 
-        row += 1
-        ws.write(row, 0, f"ACTUALIZACIÓN E INTERESES (Fuente: {self.fuente_ipc})", fmt_tit)
+        # Agregar el total histórico al final de los rubros
+        ws.write(row, 0, "Capital Histórico Total:", fmt_bold); ws.write(row, 1, total_historico, fmt_int)
+        
+        row += 2 # Dejar una fila en blanco
+        
+        ws.write(row, 0, "ACTUALIZACIÓN E INTERESES (Fuente: IPC INDEC)", fmt_tit)
         ws.write(row, 1, "", fmt_tit)
         
         cap_act = 0.0
         int_puro = 0.0
         
-        if self.fuente_ipc == "TIM BCRA":
-            # Actualización por TASA (Variable 1197 BCRA)
-            ws.write(row+1, 0, "Capital Histórico Total:", fmt_txt); ws.write(row+1, 1, total_historico, fmt_mon)
-            
-            if self.fecha_capitalizacion:
-                # Caso CON Capitalización de Intereses
-                ws.write(row+2, 0, f"INTERESES PERÍODO 1 (Despido -> {self.fecha_capitalizacion}):", fmt_bold)
-                ws.write(row+3, 0, f"Tasa Acumulada P1:", fmt_txt); ws.write(row+3, 1, f"{self.tasa_tim}%", fmt_txt)
-                
-                monto_interes_1 = total_historico * (self.tasa_tim / 100)
-                ws.write(row+4, 0, "Monto Intereses P1:", fmt_txt); ws.write(row+4, 1, monto_interes_1, fmt_mon)
-                
-                capital_capitalizado = total_historico + monto_interes_1
-                ws.write(row+5, 0, "NUEVO CAPITAL (Capitalizado):", fmt_bold); ws.write(row+5, 1, capital_capitalizado, fmt_mon)
-                
-                ws.write(row+6, 0, f"INTERESES PERÍODO 2 ({self.fecha_capitalizacion} -> Actualidad):", fmt_bold)
-                ws.write(row+7, 0, f"Tasa Acumulada P2:", fmt_txt); ws.write(row+7, 1, f"{self.tasa_tim_2}%", fmt_txt)
-                
-                monto_interes_2 = capital_capitalizado * (self.tasa_tim_2 / 100)
-                ws.write(row+8, 0, "Monto Intereses P2:", fmt_txt); ws.write(row+8, 1, monto_interes_2, fmt_mon)
-                
-                cap_act = capital_capitalizado + monto_interes_2
-                
-                ws.write(row+10, 0, "TOTAL FINAL (Capital + Int. Capitalizados):", fmt_int); ws.write(row+10, 1, cap_act, fmt_int)
-                
-            else:
-                # Caso SIN Capitalización (Simple)
-                ws.write(row+2, 0, f"Tasa Interés Acumulada:", fmt_txt); ws.write(row+2, 1, f"{self.tasa_tim}%", fmt_txt)
-                
-                monto_interes = total_historico * (self.tasa_tim / 100)
-                ws.write(row+3, 0, "MONTO INTERESES:", fmt_bold); ws.write(row+3, 1, monto_interes, fmt_mon)
-                
-                cap_act = total_historico + monto_interes # Total final
-                
-                # Ajuste de visualización para TIM (sin interés puro aparte)
-                ws.write(row+6, 0, "TOTAL FINAL (Capital + Tasa):", fmt_int); ws.write(row+6, 1, cap_act, fmt_int)
-            
-        else:
-            # Actualización por IPC + 3%
-            coef = self.ipc_fin / self.ipc_inicio
-            cap_act = total_historico * coef
-            dif = relativedelta(self.hoy, self.despido)
-            t_anios = dif.years + (dif.days / 365) + (dif.months / 12) # Aproximacion de años para interes
-            int_puro = cap_act * (0.03 * t_anios)
+        # Actualización por IPC + 3%
+        coef = self.ipc_fin / self.ipc_inicio
+        cap_act = total_historico * coef
+        
+        # Cálculo exacto de días transcurridos
+        dias_pasados = max(0, (self.hoy - self.despido).days)
+        porcentaje_acumulado = dias_pasados * (0.03 / 365) # 3% anual equivale a 3/365% diario aproximadamente 0.0082191780821918%
+        int_puro = cap_act * porcentaje_acumulado
 
-            ws.write(row+1, 0, "Capital Histórico Total:", fmt_txt); ws.write(row+1, 1, total_historico, fmt_mon)
-            ws.write(row+2, 0, f"Coeficiente IPC {self.fuente_ipc}:", fmt_txt); ws.write(row+2, 1, coef, workbook.add_format({'num_format': '0.0000', 'border': 1}))
-            ws.write(row+3, 0, "CAPITAL ACTUALIZADO:", fmt_bold); ws.write(row+3, 1, cap_act, fmt_mon)
-            ws.write(row+4, 0, f"Interés Puro (3% anual):", fmt_txt); ws.write(row+4, 1, int_puro, fmt_mon)
-            ws.write(row+6, 0, "TOTAL FINAL ACTUALIZADO:", fmt_int); ws.write(row+6, 1, cap_act + int_puro, fmt_int)
+        ws.write(row+1, 0, "Coeficiente IPC INDEC:", fmt_txt); ws.write(row+1, 1, coef, workbook.add_format({'num_format': '0.0000', 'border': 1}))
+        ws.write(row+2, 0, "CAPITAL ACTUALIZADO (IPC):", fmt_bold); ws.write(row+2, 1, cap_act, fmt_mon)
+        ws.write(row+3, 0, f"Interés Puro (3% anual - {dias_pasados} días - {porcentaje_acumulado*100:.2f}% acumulado):", fmt_txt); ws.write(row+3, 1, int_puro, fmt_mon)
+        ws.write(row+5, 0, "TOTAL FINAL (Capital Actualizado + Int. 3%):", fmt_int); ws.write(row+5, 1, cap_act + int_puro, fmt_int)
         
         workbook.close()
         if not buffer:
              print(f"\n>>> ¡LIQUIDACIÓN CREADA CON ÉXITO! <<<")
-def obtener_datos_online(fuente, fecha_inicio=None, fecha_fin=None, serie_id_personalizado=None):
+def obtener_datos_online(fecha_objetivo=None):
     """
     Obtiene datos de la API de Datos Argentina.
-    Si fuente es IPC (INDEC/CABA), devuelve el valor del índice para una fecha o el último disponible.
-    Si fuente es TASAS (TIM BCRA), devuelve la Tasa Acumulada entre fecha_inicio y fecha_fin.
+    Devuelve el valor del índice IPC INDEC para la fecha despido/liquidación (o el último disponible si es None).
     """
     try:
         url = "https://apis.datos.gob.ar/series/api/series/"
-        
-        # IDs por defecto
-        series_ids = {
-            "INDEC": "145.3_INGNACUAL_DICI_M_38",
-            "CABA": "11.3_INIVEL_GEN_DICI_M_26",
-            "TIM BCRA": "168.1_T_ACT_G_D_D_0_38" # Default: Tasa Activa BNA (hasta que TIM tenga ID propio)
-        }
-        
-        id_serie = serie_id_personalizado if serie_id_personalizado else series_ids.get(fuente)
-        
-        if not id_serie:
-            return None
+        id_serie = "145.3_INGNACUAL_DICI_M_38" # IPC INDEC Nacional
 
-        # Si es IPC, la lógica es puntual (valor de fecha X o último)
-        if fuente in ["INDEC", "CABA"]:
-            params = {"ids": id_serie, "format": "json", "limit": 5000}
-            response = requests.get(url, params=params, timeout=10).json()
-            data = response['data']
-            
-            if fecha_inicio: # Usamos fecha_inicio como "fecha objetivo" para IPC
-                f_dt = datetime.strptime(fecha_inicio, "%d/%m/%Y")
-                target = f_dt.strftime("%Y-%m-01")
-                for entry in data:
-                    if entry[0] == target: return entry[1]
-                # Si no encuentra exacto, retorna el anterior inmediato (caso fechas intermedias)
-                # Para simplificar, retornamos el último si no hay match (aunque lo ideal sería interpolar o buscar el mes)
-                return data[-1][1] 
-            else:
-                # Retorna último valor y fecha
-                last_entry = data[-1]
-                return last_entry[1], datetime.strptime(last_entry[0], "%Y-%m-%d").strftime("%d/%m/%Y")
-
-        # Si es TASA (BCRA), usamos la API oficial del BCRA para la variable 1197 (TIM)
-        elif fuente == "TIM BCRA":
-            # Variable 1197: Tasa de Intereses Moratorios (TIM) - Es un coeficiente/índice
-            id_variable_bcra = "1197"
-            url_bcra = f"https://api.bcra.gob.ar/estadisticas/v3.0/monetarias/{id_variable_bcra}"
-            
-            if not fecha_inicio: return 0.0
-            
-            # Formato fecha para API BCRA: YYYY-MM-DD
-            f_ini_dt = datetime.strptime(fecha_inicio, "%d/%m/%Y")
-            f_fin_dt = datetime.strptime(fecha_fin, "%d/%m/%Y") if fecha_fin else datetime.now()
-            
-            desde_str = f_ini_dt.strftime("%Y-%m-%d")
-            hasta_str = f_fin_dt.strftime("%Y-%m-%d")
-            
-            params = {
-                "desde": desde_str,
-                "hasta": hasta_str
-            }
-            
-            # Solicitud a API BCRA (sin verificar SSL por problemas comunes con certificados gubernamentales, o manejando excepción)
-            response = requests.get(url_bcra, params=params, timeout=15, verify=False) # verify=False a veces es necesario en ent. locales
-            
-            if response.status_code != 200:
-                print(f"Error BCRA: {response.status_code}")
-                # Fallbck: Intentar sin fechas si falla el filtrado, o retornar error
-                return None
-                
-            data = response.json().get('results', [])
-            
-            if not data:
-                return None
-                
-            # La API devuelve lista ordenada por fecha descendente o ascendente.
-            # Convertimos a lista de tuplas (fecha, valor) y ordenamos por fecha
-            datos_ordenados = []
+        params = {"ids": id_serie, "format": "json", "limit": 5000}
+        response = requests.get(url, params=params, timeout=10).json()
+        data = response['data']
+        
+        if fecha_objetivo: # Usamos fecha_objetivo como "fecha objetivo" para IPC
+            f_dt = datetime.strptime(fecha_objetivo, "%d/%m/%Y")
+            target = f_dt.strftime("%Y-%m-01")
             for entry in data:
-                try:
-                    f_d = datetime.strptime(entry['fecha'], "%Y-%m-%d")
-                    val = float(entry['valor'])
-                    datos_ordenados.append((f_d, val))
-                except: continue
-                
-            datos_ordenados.sort(key=lambda x: x[0]) # Ordenar ascendente
+                if entry[0] == target: return entry[1], datetime.strptime(entry[0], "%Y-%m-%d").strftime("%d/%m/%Y")
             
-            if not datos_ordenados: return None
+            # Fallback: si la fecha_objetivo es más nueva que el último dato disponible, devuelve el último
+            last_entry = data[-1]
+            last_dt = datetime.strptime(last_entry[0], "%Y-%m-%d")
+            if f_dt >= last_dt:
+                return last_entry[1], last_dt.strftime("%d/%m/%Y")
             
-            # Buscar valor más cercano a fecha inicio (o el primero disponible)
-            valor_inicio = None
-            for d, v in datos_ordenados:
-                if d >= f_ini_dt:
-                    valor_inicio = v
-                    break
-            if valor_inicio is None: valor_inicio = datos_ordenados[0][1] # Fallback al más antiguo
-            
-            # Buscar valor más cercano a fecha fin (o el último disponible)
-            valor_fin = datos_ordenados[-1][1]
-            
-            # Cálculo de Tasa Acumulada %: ((ValorFin / ValorInicio) - 1) * 100
-            tasa_acumulada = ((valor_fin / valor_inicio) - 1) * 100
-            
-            return round(tasa_acumulada, 2)
+            # Si es más vieja que el primer dato (muy raro), devuelve el primero
+            return data[0][1], datetime.strptime(data[0][0], "%Y-%m-%d").strftime("%d/%m/%Y")
+        else:
+            # Retorna último valor y fecha
+            last_entry = data[-1]
+            return last_entry[1], datetime.strptime(last_entry[0], "%Y-%m-%d").strftime("%d/%m/%Y")
 
     except Exception as e:
         print(f"Error API: {e}")
-        return None
+        return None, None
 
 def solicitar_datos():
-    print("\n" + "="*45 + "\n  LIQUIDADOR JUDICIAL - IPC INDEC/CABA\n" + "="*45)
+    print("\n" + "="*45 + "\n  LIQUIDADOR JUDICIAL - IPC INDEC\n" + "="*45)
     car = input("1. Carátula: ")
     ing = input("2. Fecha de ingreso (DD/MM/AAAA): ")
     des = input("3. Fecha de despido (DD/MM/AAAA): ")
     rem = input("4. Mejor Remuneración: ").replace(',', '.')
-    
-    print("\nFUENTE DE ACTUALIZACIÓN:\n1. IPC INDEC (Nacional)\n2. IPC CABA (Ciudad)")
-    fnt = "INDEC" if input("Seleccione fuente (1 o 2): ") == "1" else "CABA"
 
-    print(f"\n--- Conectando a Base de Datos de {fnt} ---")
-    val_ini = obtener_ipc_online(fnt, des)
-    res_fin = obtener_ipc_online(fnt) # Guardamos el resultado completo antes de desempaquetar
+    print(f"\n--- Conectando a Base de Datos de INDEC ---")
+    val_ini_tuple = obtener_datos_online(fecha_objetivo=des)
+    val_fin_tuple = obtener_datos_online() # Por defecto CLI trae la última fecha para la liquidación
     
-    if val_ini and res_fin:
-        val_fin, fecha_fin = res_fin
-        print(f"[*] IPC Mes Despido ({fnt}): {val_ini}")
+    val_ini = val_ini_tuple[0] if val_ini_tuple else None
+    
+    if val_ini and val_fin_tuple and val_fin_tuple[0]:
+        val_fin, fecha_fin = val_fin_tuple
+        print(f"[*] IPC Mes Despido (INDEC): {val_ini}")
         print(f"[*] Último IPC disponible ({fecha_fin}): {val_fin}")
         if input("\n¿Confirmar estos valores? (S/N): ").upper() != 'S':
             val_ini = float(input("Ingresar IPC Mes Despido manual: ").replace(',', '.'))
@@ -380,7 +335,16 @@ def solicitar_datos():
     a1 = input("\n¿Procede Art 1 Ley 25.323? (S/N): ").upper() == 'S'
     a2 = input("¿Procede Art 2 Ley 25.323? (S/N): ").upper() == 'S'
     
-    return LiquidadorLaboral(car, ing, des, float(rem), art1=a1, art2=a2, ipc_inicio=val_ini, ipc_fin=val_fin, fuente_ipc=fnt)
+    inc_sac = False
+    f_des = datetime.strptime(des, "%d/%m/%Y")
+    if f_des.month in (1, 7):
+        prompt_sac = "¿Adeuda SAC 1er Semestre?" if f_des.month == 7 else "¿Adeuda SAC 2do Semestre (año anterior)?"
+        inc_sac = input(f"{prompt_sac} (S/N): ").upper() == 'S'
+    
+    a80 = input("¿Aplica Art 80 LCT? (S/N): ").upper() == 'S'
+    d34 = input("¿Aplica Dto 34/2019? (S/N): ").upper() == 'S'
+    
+    return LiquidadorLaboral(car, ing, des, float(rem), art1=a1, art2=a2, ipc_inicio=val_ini, ipc_fin=val_fin, incluir_sac_anterior=inc_sac, art80=a80, dto34=d34)
 
 if __name__ == "__main__":
     try:

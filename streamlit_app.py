@@ -69,22 +69,30 @@ def main():
             
         caratula = st.text_input("Carátula / Expediente", value="", placeholder="Ej: García c/ Pérez s/ Despido", key="caratula")
         
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         with col1:
             f_ingreso = st.date_input("Fecha Ingreso", value=date.today(), min_value=date(1950, 1, 1), max_value=date(2100, 12, 31), format="DD/MM/YYYY", key="f_ingreso")
         with col2:
             f_despido = st.date_input("Fecha Despido", value=date.today(), min_value=date(1950, 1, 1), max_value=date(2100, 12, 31), format="DD/MM/YYYY", key="f_despido")
+        with col3:
+            f_liquidacion = st.date_input("Fecha Liquidación", value=date.today(), min_value=date(1950, 1, 1), max_value=date(2100, 12, 31), format="DD/MM/YYYY", key="f_liquidacion")
             
         sueldo = st.number_input("Mejor Remuneración ($)", min_value=0.0, value=0.0, step=1000.0, format="%.2f", key="sueldo")
         
         st.subheader("Configuración")
         causa = st.selectbox("Causa de Extinción", ["Sin Causa", "Con causa / Renuncia", "Mutuo Acuerdo"], key="causa")
         
-        fuente_ipc = st.radio("Fuente de Actualización", ["INDEC", "CABA", "TIM BCRA"], index=0, key="fuente_ipc")
+        st.markdown("##### Multas LCT y Ley 25.323")
+        art1 = st.checkbox("Art. 1 Ley 25.323 (Relación no registrada)", value=False, key="art1")
+        art2 = st.checkbox("Art. 2 Ley 25.323 (Falta de pago)", value=False, key="art2")
+        art80 = st.checkbox("Art. 80 LCT (Certificados)", value=False, key="art80")
+        dto34 = st.checkbox("Dto. 34/2019 (Doble Indemnización)", value=False, key="dto34")
         
-        st.markdown("##### Multas Ley 25.323")
-        art1 = st.checkbox("Art. 1 (Relación no registrada)", value=False, key="art1")
-        art2 = st.checkbox("Art. 2 (Falta de pago)", value=False, key="art2")
+        # Opción SAC adeudado (Solo Julio o Enero)
+        incluir_sac_ant = False
+        if f_despido.month in (1, 7):
+            label_sac = "¿Incluir SAC 1er Semestre adeudado?" if f_despido.month == 7 else "¿Incluir SAC 2do Semestre (año ant.) adeudado?"
+            incluir_sac_ant = st.checkbox(label_sac, value=True, key="incluir_sac_ant", help="Marcar si al momento del despido aún no se había percibido el SAC del semestre anterior.")
         
         st.markdown("##### Fallo Vizzoti")
         aplicar_vizzoti = st.checkbox("Aplicar Tope / Fallo Vizzoti", value=False, key="aplicar_vizzoti")
@@ -125,90 +133,37 @@ def main():
 
         st.markdown("---")
         
-        # Variables de índices/tasas
+        # Variables de índices
         ipc_inicio = 1.0
         ipc_fin = 1.0
-        tasa_tim = 0.0
-        serie_id_tim = "168.1_T_ACT_G_D_D_0_38" # Default inicial
 
-        if fuente_ipc in ["INDEC", "CABA"]:
-             # ... (Bloque IPC existente) ...
-             if st.button("🔄 Actualizar Índices Online"):
-                with st.spinner('Consultando API del gobierno...'):
-                    try:
-                        # Intentamos obtener valores online
-                        val_ini = obtener_datos_online(fuente_ipc, fecha_inicio=f_despido.strftime("%d/%m/%Y"))
-                        val_fin_data = obtener_datos_online(fuente_ipc)
-                        
-                        if val_ini and val_fin_data:
-                            val_fin, fecha_fin = val_fin_data
-                            st.session_state['ipc_inicio'] = val_ini
-                            st.session_state['ipc_fin'] = val_fin
-                            st.session_state['fecha_ipc_fin'] = fecha_fin
-                            st.success(f"Índices actualizados ({fecha_fin})")
-                        else:
-                            st.error("No se pudieron obtener datos online.")
-                    except Exception as e:
-                        st.error(f"Error de conexión: {e}")
-             
-             # Inputs manuales o automáticos para IPC
-             ipc_inicio = st.number_input("IPC Inicio (Fecha Despido)", 
-                                         value=st.session_state.get('ipc_inicio', 100.0), 
-                                         format="%.4f")
-             ipc_fin = st.number_input(f"IPC Cierre ({st.session_state.get('fecha_ipc_fin', 'Actual')})", 
-                                      value=st.session_state.get('ipc_fin', 500.0), 
-                                      format="%.4f")
-        
-        else:
-            # Opción TIM BCRA
-            st.info("ℹ️ Para TIM BCRA, el sistema consulta la **Variable 1197** (Tasa de Intereses Moratorios) del Banco Central.")
+        if st.button("🔄 Actualizar Índices Online"):
+            with st.spinner('Consultando API del INDEC (Datos Argentina)...'):
+                try:
+                    # Intentamos obtener valores online con las fechas exactas
+                    val_ini_data = obtener_datos_online(fecha_objetivo=f_despido.strftime("%d/%m/%Y"))
+                    val_fin_data = obtener_datos_online(fecha_objetivo=f_liquidacion.strftime("%d/%m/%Y"))
+                    
+                    if val_ini_data and val_fin_data and val_ini_data[0] and val_fin_data[0]:
+                        val_ini, fecha_ini_real = val_ini_data
+                        val_fin, fecha_fin_real = val_fin_data
+                        st.session_state['ipc_inicio'] = val_ini
+                        st.session_state['ipc_fin'] = val_fin
+                        st.session_state['fecha_ipc_ini'] = fecha_ini_real
+                        st.session_state['fecha_ipc_fin'] = fecha_fin_real
+                        st.success(f"Índices obtenidos! Inicio ({fecha_ini_real}) | Cierre ({fecha_fin_real})")
+                    else:
+                        st.error("No se pudieron obtener datos online para esas fechas.")
+                except Exception as e:
+                    st.error(f"Error de conexión: {e}")
             
-            # Opción de Capitalización (Anatocismo) Art 770 CCyC
-            capitalizar_intereses = st.checkbox("Capitalizar intereses en fecha específica (Art. 770 CCyC)", value=False)
-            fecha_capitalizacion = None
-            tasa_tim_2 = 0.0
-            
-            if capitalizar_intereses:
-                fecha_capitalizacion = st.date_input("Fecha de Capitalización (Corte)", value=date.today(), min_value=f_despido, max_value=date.today(), format="DD/MM/YYYY")
-            
-            if st.button("🔄 Consultar BCRA Online"):
-                 with st.spinner('Conectando a api.bcra.gob.ar (Var. 1197)...'):
-                    try:
-                         f_ini_str = f_despido.strftime("%d/%m/%Y")
-                         f_fin_str = datetime.now().strftime("%d/%m/%Y")
-                         
-                         if capitalizar_intereses and fecha_capitalizacion:
-                             # Dos períodos
-                             f_cap_str = fecha_capitalizacion.strftime("%d/%m/%Y")
-                             
-                             val_tasa_1 = obtener_datos_online("TIM BCRA", fecha_inicio=f_ini_str, fecha_fin=f_cap_str)
-                             val_tasa_2 = obtener_datos_online("TIM BCRA", fecha_inicio=f_cap_str, fecha_fin=f_fin_str)
-                             
-                             if val_tasa_1 is not None and val_tasa_2 is not None:
-                                 st.session_state['tasa_tim'] = val_tasa_1
-                                 st.session_state['tasa_tim_2'] = val_tasa_2
-                                 st.success(f"Tasas obtenidas: P1 ({f_ini_str}-{f_cap_str}): {val_tasa_1}% | P2 ({f_cap_str}-{f_fin_str}): {val_tasa_2}%")
-                             else:
-                                 st.error("Error al obtener tasas para los períodos indicados.")
-                         else:
-                             # Un solo período
-                             val_tasa = obtener_datos_online("TIM BCRA", fecha_inicio=f_ini_str, fecha_fin=f_fin_str)
-                             
-                             if val_tasa is not None:
-                                 st.session_state['tasa_tim'] = val_tasa
-                                 st.session_state['tasa_tim_2'] = 0.0
-                                 st.success(f"Tasa BCRA acumulada: {val_tasa}% ({f_ini_str} - {f_fin_str})")
-                             else:
-                                 st.error("No se pudieron obtener datos del BCRA.")
-                    except Exception as e:
-                        st.error(f"Error: {e}")
-
-            if capitalizar_intereses:
-                 c_t1, c_t2 = st.columns(2)
-                 tasa_tim = c_t1.number_input("Tasa Interés P1 (Al Corte) %", value=st.session_state.get('tasa_tim', 50.0), step=1.0, format="%.2f")
-                 tasa_tim_2 = c_t2.number_input("Tasa Interés P2 (Desde Corte) %", value=st.session_state.get('tasa_tim_2', 50.0), step=1.0, format="%.2f")
-            else:
-                 tasa_tim = st.number_input("Tasa Interés Acumulada (%)", value=st.session_state.get('tasa_tim', 100.0), step=1.0, format="%.2f")
+        # Inputs manuales o automáticos para IPC
+        ipc_inicio = st.number_input(f"IPC Inicio ({st.session_state.get('fecha_ipc_ini', 'Despido')})", 
+                                    value=st.session_state.get('ipc_inicio', 100.0), 
+                                    format="%.4f")
+        ipc_fin = st.number_input(f"IPC Cierre ({st.session_state.get('fecha_ipc_fin', 'Liquidación')})", 
+                                value=st.session_state.get('ipc_fin', 500.0), 
+                                format="%.4f")
 
     # --- LÓGICA DE CÁLCULO ---
     if sueldo > 0:
@@ -224,13 +179,13 @@ def main():
                 art2=art2,
                 ipc_inicio=ipc_inicio,
                 ipc_fin=ipc_fin,
-                fuente_ipc=fuente_ipc,
-                tasa_tim=tasa_tim,
-                fecha_capitalizacion=fecha_capitalizacion.strftime("%d/%m/%Y") if (fuente_ipc == "TIM BCRA" and capitalizar_intereses and fecha_capitalizacion) else None,
-                tasa_tim_2=tasa_tim_2 if (fuente_ipc == "TIM BCRA" and capitalizar_intereses) else 0.0,
                 aplicar_vizzoti=aplicar_vizzoti,
                 tope_cct=tope_cct if aplicar_vizzoti else None,
-                rubros_adicionales=rubros_extras
+                rubros_adicionales=rubros_extras,
+                fecha_liquidacion=f_liquidacion.strftime("%d/%m/%Y"),
+                incluir_sac_anterior=incluir_sac_ant,
+                art80=art80,
+                dto34=dto34
             )
             
             # --- VISUALIZACIÓN DE RESULTADOS ---
@@ -242,37 +197,84 @@ def main():
             periodos = liquidador.calcular_periodos_245()
             base_indem = liquidador.calcular_base_245()
             
+            # --- REORDENAMIENTO DE RUBROS SEGÚN SOLICITUD ---
             rubros = []
 
-            # Rubro: Días trabajados (mes despido) - SE CALCULA SIEMPRE
+            # 1. Indemnización por antigüedad (art. 245 LCT)
+            monto_245 = base_indem * periodos
+            if causa == "Sin Causa":
+                label_245 = "Indemnización por antigüedad (art. 245 LCT cfr. tope \"Vizzoti\" CSJN)" if aplicar_vizzoti else "Indemnización por antigüedad (art. 245 LCT)"
+                rubros.append((label_245, monto_245))
+
+                # 2. Indemnización sustitutiva del preaviso (art. 232 LCT)
+                monto_preaviso = liquidador.sueldo * (2 if anios >= 5 else 1)
+                rubros.append(("Indemnización sustitutiva del preaviso (art. 232 LCT)", monto_preaviso))
+
+                # 3. SAC sobre preaviso
+                rubros.append(("SAC sobre preaviso", monto_preaviso / 12))
+
+                # 4. Integración del mes de despido (art. 233 LCT)
+                monto_integracion = liquidador.calcular_integracion_mes()
+                if monto_integracion > 0:
+                    rubros.append(("Integración del mes de despido (art. 233 LCT)", monto_integracion))
+                    # 5. SAC sobre integración
+                    rubros.append(("SAC sobre integración", monto_integracion / 12))
+                
+                # Dto. 34/2019
+                if dto34:
+                    monto_dto34 = monto_245 + monto_preaviso + (monto_preaviso / 12) + monto_integracion + (monto_integracion / 12 if monto_integracion > 0 else 0)
+                    rubros.append(("Incremento Indemnizatorio Dto. 34/2019", monto_dto34))
+            else:
+                 monto_preaviso = 0
+                 monto_integracion = 0
+            
+            # 6. Días trabajados mes despido
             monto_dias_trab = liquidador.calcular_dias_trabajados_mes_despido()
             rubros.append((f"Días trabajados mes despido ({f_despido.day} días)", monto_dias_trab))
 
-            if causa == "Sin Causa":
-                label_245 = "Indemnización por antigüedad (art. 245 LCT cfr. tope \"Vizzoti\" CSJN)" if aplicar_vizzoti else "Indemnización por antigüedad (art. 245 LCT)"
-                rubros.append((label_245, base_indem * periodos))
-                rubros.append(("Indemnización sustitutiva del preaviso (art. 232 LCT)", (liquidador.sueldo * (2 if anios >= 5 else 1))))
-                rubros.append(("SAC sobre preaviso", (liquidador.sueldo * (2 if anios >= 5 else 1)) / 12))
-                rubros.append(("Integración del mes de despido (art. 233 LCT)", liquidador.calcular_integracion_mes()))
-                rubros.append(("SAC sobre integración", liquidador.calcular_integracion_mes() / 12))
-            
-            rubros.append(("SAC Prop.", liquidador.calcular_sac_prop()))
-            rubros.append(("Vacaciones Prop.", liquidador.calcular_vacaciones_prop()))
+            # SAC Semestre Anterior (si corresponde)
+            sac_ant = liquidador.calcular_sac_semestre_anterior()
+            if sac_ant > 0:
+                rubros.append(("SAC Semestre Anterior Adeudado", sac_ant))
 
-            # Multas para visualización
-            monto_multas = 0
+            # 7. SAC Prop.
+            rubros.append(("SAC Prop.", liquidador.calcular_sac_prop()))
+
+            # 8. Vacaciones Prop.
+            vacaciones_prop, vac_dias_ui = liquidador.calcular_vacaciones_prop()
+            rubros.append((f"Vacaciones Prop. ({vac_dias_ui:.2f} días)", vacaciones_prop))
+
+            # 9. SAC s/ vacaciones
+            rubros.append(("SAC s/ vacaciones", vacaciones_prop / 12))
+
+            # 10. Salarios adeudados (Rubros adicionales predeterminados)
+            # Buscamos en rubros_extras si hay salarios adeudados
+            otros_extras_visual = []
+            if rubros_extras:
+                for c, m in rubros_extras:
+                    if "Salarios adeudados" in c:
+                        rubros.append((c, m))
+                    else:
+                        otros_extras_visual.append((c, m))
+
+            # 11. Art. 1º Ley 25.323
             if art1: 
-                monto_art1 = base_indem * periodos
-                rubros.append(("Art. 1º Ley 25.323", monto_art1))
-                monto_multas += monto_art1
+                rubros.append(("Art. 1º Ley 25.323", monto_245))
             
-            total_historico = sum(m for r, m in rubros)
-            
+            # 12. Art. 2º Ley 25.323
             if art2: 
-                # Simplificación visual, usamos el total acumulado parecido a la logica del excel
-                monto_art2 = total_historico * 0.5  
+                monto_art2 = (monto_245 + monto_preaviso + monto_integracion) * 0.5
                 rubros.append(("Art. 2º Ley 25.323", monto_art2))
-                total_historico += monto_art2
+
+            # 13. Art. 80 LCT
+            if art80:
+                rubros.append(("Multa Art. 80 LCT", sueldo * 3))
+
+            # Resto de rubros adicionales
+            for c, m in otros_extras_visual:
+                rubros.append((c, m))
+
+            total_historico = sum(m for r, m in rubros)
 
             # Sumar rubros adicionales al display
             if rubros_extras:
@@ -281,35 +283,23 @@ def main():
                     total_historico += m
 
             # Cálculo de actualización para visualización
-            if fuente_ipc == "TIM BCRA":
-                coef = 0 # No aplica
-                if capitalizar_intereses and fecha_capitalizacion:
-                    int_p1 = total_historico * (tasa_tim / 100)
-                    cap_cap = total_historico + int_p1
-                    int_p2 = cap_cap * (tasa_tim_2 / 100)
-                    capital_act = cap_cap + int_p2
-                    texto_coef = f"Tasas: {tasa_tim}% + {tasa_tim_2}%"
-                    texto_cap = f"Total Final (Capitalizado):"
-                else:
-                    monto_interes = total_historico * (tasa_tim / 100)
-                    capital_act = total_historico + monto_interes
-                    texto_coef = f"Tasa: {tasa_tim}%"
-                    texto_cap = f"Total Final (c/ Int.):"
-            else:
-                coef = ipc_fin / ipc_inicio
-                capital_act = total_historico * coef
-                texto_coef = f"Coef. IPC:"
-                texto_cap = f"Capital Actualizado:"
+            coef = ipc_fin / ipc_inicio
+            capital_act = total_historico * coef
+            
+            # Cálculo exacto de días transcurridos
+            dias_pasados = max(0, (f_liquidacion - f_despido).days)
+            porcentaje_acumulado = dias_pasados * (0.03 / 365)
+            int_puro = capital_act * porcentaje_acumulado
+            
+            texto_coef = f"Coef. IPC:"
+            texto_cap = f"Total (+3% an. - {dias_pasados} d. - {porcentaje_acumulado*100:.2f}% ac.):"
             
             with col_res1:
                 st.info(f"**Antigüedad:** {anios} años, {meses} meses")
             with col_res2:
-                if fuente_ipc == "TIM BCRA":
-                     st.warning(f"**{texto_coef}**")
-                else:
-                     st.warning(f"**{texto_coef}** {coef:.4f}")
+                st.warning(f"**{texto_coef}** {coef:.4f}")
             with col_res3:
-                st.success(f"**{texto_cap}** ${capital_act:,.2f}")
+                st.success(f"**{texto_cap}** ${(capital_act + int_puro):,.2f}")
 
             if aplicar_vizzoti:
                 if base_indem == sueldo * 0.67:
