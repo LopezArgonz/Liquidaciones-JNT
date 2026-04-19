@@ -8,7 +8,7 @@ import requests
 import io
 
 class LiquidadorLaboral:
-    def __init__(self, caratula, ingreso, despido, sueldo, causa="Sin Causa", art1=False, art2=False, ipc_inicio=1.0, ipc_fin=1.0, aplicar_vizzoti=False, tope_cct=None, rubros_adicionales=None, fecha_liquidacion=None, incluir_sac_anterior=False, art80=False, dto34=False):
+    def __init__(self, caratula, ingreso, despido, sueldo, causa="Sin Causa", art1=False, art2=False, ipc_inicio=1.0, ipc_fin=1.0, aplicar_vizzoti=False, tope_cct=None, rubros_adicionales=None, fecha_liquidacion=None, incluir_sac_anterior=False, art80=False, dto34=False, art8_24013=False, art15_24013=False, pagos_a_cuenta=0.0):
         self.caratula = caratula
         self.ingreso = datetime.strptime(ingreso, "%d/%m/%Y")
         self.despido = datetime.strptime(despido, "%d/%m/%Y")
@@ -21,6 +21,8 @@ class LiquidadorLaboral:
         self.art1 = art1
         self.art2 = art2
         self.art80 = art80
+        self.art8_24013 = art8_24013
+        self.art15_24013 = art15_24013
         self.dto34 = dto34
         self.ipc_inicio = ipc_inicio
         self.ipc_fin = ipc_fin
@@ -28,6 +30,7 @@ class LiquidadorLaboral:
         self.tope_cct = tope_cct
         self.rubros_adicionales = rubros_adicionales if rubros_adicionales else []
         self.incluir_sac_anterior = incluir_sac_anterior
+        self.pagos_a_cuenta = pagos_a_cuenta
 
         self.antiguedad = relativedelta(self.despido, self.ingreso)
 
@@ -233,6 +236,19 @@ class LiquidadorLaboral:
             rubros.append(["Multa Art. 80 LCT", monto_art80])
             total_historico += monto_art80
 
+        # 14. Art. 8 Ley 24.013 (Relación no registrada)
+        if self.art8_24013:
+            total_meses = self.antiguedad.years * 12 + self.antiguedad.months
+            monto_art8 = (total_meses * self.sueldo) / 4
+            rubros.append([f"Multa Art. 8º Ley 24.013 ({total_meses} meses)", monto_art8])
+            total_historico += monto_art8
+
+        # 15. Art. 15 Ley 24.013 (Despido tras reclamo)
+        if self.art15_24013:
+            monto_art15 = monto_245 + monto_preaviso + (monto_preaviso / 12) + monto_integracion + (monto_integracion / 12 if monto_integracion > 0 else 0)
+            rubros.append(["Multa Art. 15 Ley 24.013", monto_art15])
+            total_historico += monto_art15
+
         # Resto de rubros adicionales
         for concepto, monto in otros_extras:
             rubros.append([concepto, monto])
@@ -244,7 +260,15 @@ class LiquidadorLaboral:
             row += 1
 
         # Agregar el total histórico al final de los rubros
-        ws.write(row, 0, "Capital Histórico Total:", fmt_bold); ws.write(row, 1, total_historico, fmt_int)
+        ws.write(row, 0, "Subtotal Capital Histórico:", fmt_bold); ws.write(row, 1, total_historico, fmt_int)
+        
+        capital_neto = total_historico
+        if self.pagos_a_cuenta > 0:
+            row += 1
+            ws.write(row, 0, "Pagos realizados a cuenta (al despido):", fmt_bold); ws.write(row, 1, -self.pagos_a_cuenta, fmt_mon)
+            capital_neto = total_historico - self.pagos_a_cuenta
+            row += 1
+            ws.write(row, 0, "CAPITAL HISTÓRICO NETO (Sujeto a actualización):", fmt_bold); ws.write(row, 1, capital_neto, fmt_int)
         
         row += 2 # Dejar una fila en blanco
         
@@ -256,10 +280,10 @@ class LiquidadorLaboral:
         
         # Actualización por IPC + 3%
         coef = self.ipc_fin / self.ipc_inicio
-        cap_act = total_historico * coef
+        cap_act = capital_neto * coef
         
         # Cálculo exacto de días transcurridos
-        dias_pasados = max(0, (self.hoy - self.despido).days)
+        dias_pasados = max(0, (self.hoy - self.despido).days) + 1
         porcentaje_acumulado = dias_pasados * (0.03 / 365) # 3% anual equivale a 3/365% diario aproximadamente 0.0082191780821918%
         int_puro = cap_act * porcentaje_acumulado
 
@@ -267,6 +291,7 @@ class LiquidadorLaboral:
         ws.write(row+2, 0, "CAPITAL ACTUALIZADO (IPC):", fmt_bold); ws.write(row+2, 1, cap_act, fmt_mon)
         ws.write(row+3, 0, f"Interés Puro (3% anual - {dias_pasados} días - {porcentaje_acumulado*100:.2f}% acumulado):", fmt_txt); ws.write(row+3, 1, int_puro, fmt_mon)
         ws.write(row+5, 0, "TOTAL FINAL (Capital Actualizado + Int. 3%):", fmt_int); ws.write(row+5, 1, cap_act + int_puro, fmt_int)
+        ws.write(row+6, 0, "TOPE MÍNIMO (67% s/ Total Actualizado):", fmt_txt); ws.write(row+6, 1, (cap_act + int_puro) * 0.67, fmt_mon)
         
         workbook.close()
         if not buffer:
@@ -278,7 +303,7 @@ def obtener_datos_online(fecha_objetivo=None):
     """
     try:
         url = "https://apis.datos.gob.ar/series/api/series/"
-        id_serie = "145.3_INGNACUAL_DICI_M_38" # IPC INDEC Nacional
+        id_serie = "145.3_INGNACNAL_DICI_M_15" # IPC INDEC Nacional (Base 2016)
 
         params = {"ids": id_serie, "format": "json", "limit": 5000}
         response = requests.get(url, params=params, timeout=10).json()
@@ -344,7 +369,7 @@ def solicitar_datos():
     a80 = input("¿Aplica Art 80 LCT? (S/N): ").upper() == 'S'
     d34 = input("¿Aplica Dto 34/2019? (S/N): ").upper() == 'S'
     
-    return LiquidadorLaboral(car, ing, des, float(rem), art1=a1, art2=a2, ipc_inicio=val_ini, ipc_fin=val_fin, incluir_sac_anterior=inc_sac, art80=a80, dto34=d34)
+    return LiquidadorLaboral(car, ing, des, float(rem), art1=a1, art2=a2, ipc_inicio=val_ini, ipc_fin=val_fin, incluir_sac_anterior=inc_sac, art80=a80, dto34=d34, pagos_a_cuenta=0.0)
 
 if __name__ == "__main__":
     try:

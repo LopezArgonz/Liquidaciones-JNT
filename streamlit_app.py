@@ -82,9 +82,11 @@ def main():
         st.subheader("Configuración")
         causa = st.selectbox("Causa de Extinción", ["Sin Causa", "Con causa / Renuncia", "Mutuo Acuerdo"], key="causa")
         
-        st.markdown("##### Multas LCT y Ley 25.323")
+        st.markdown("##### Multas LCT y Leyes 25.323 y 24.013")
         art1 = st.checkbox("Art. 1 Ley 25.323 (Relación no registrada)", value=False, key="art1")
         art2 = st.checkbox("Art. 2 Ley 25.323 (Falta de pago)", value=False, key="art2")
+        art8_24013 = st.checkbox("Art. 8 Ley 24.013 (Falta de registro)", value=False, key="art8_24013")
+        art15_24013 = st.checkbox("Art. 15 Ley 24.013 (Despido tras reclamo)", value=False, key="art15_24013")
         art80 = st.checkbox("Art. 80 LCT (Certificados)", value=False, key="art80")
         dto34 = st.checkbox("Dto. 34/2019 (Doble Indemnización)", value=False, key="dto34")
         
@@ -131,6 +133,12 @@ def main():
                 if row["Concepto"] and row["Monto"]:
                      rubros_extras.append((row["Concepto"], float(row["Monto"])))
 
+        st.markdown("##### Pagos a Cuenta")
+        aplicar_pagos_cuenta = st.checkbox("Habilitar Pagos a Cuenta", value=False, key="aplicar_pagos_cuenta")
+        monto_pagos_cuenta = 0.0
+        if aplicar_pagos_cuenta:
+            monto_pagos_cuenta = st.number_input("Monto pagado a cuenta ($)", min_value=0.0, value=0.0, step=1000.0, format="%.2f", key="monto_pagos_cuenta")
+
         st.markdown("---")
         
         # Variables de índices
@@ -158,11 +166,11 @@ def main():
                     st.error(f"Error de conexión: {e}")
             
         # Inputs manuales o automáticos para IPC
-        ipc_inicio = st.number_input(f"IPC Inicio ({st.session_state.get('fecha_ipc_ini', 'Despido')})", 
-                                    value=st.session_state.get('ipc_inicio', 100.0), 
+        ipc_inicio = st.number_input(f"IPC Inicio ({st.session_state.get('fecha_ipc_ini', 'Mes Despido')})", 
+                                    value=st.session_state.get('ipc_inicio', 1000.0), 
                                     format="%.4f")
-        ipc_fin = st.number_input(f"IPC Cierre ({st.session_state.get('fecha_ipc_fin', 'Liquidación')})", 
-                                value=st.session_state.get('ipc_fin', 500.0), 
+        ipc_fin = st.number_input(f"IPC Cierre ({st.session_state.get('fecha_ipc_fin', 'Hoy')})", 
+                                value=st.session_state.get('ipc_fin', 5000.0), 
                                 format="%.4f")
 
     # --- LÓGICA DE CÁLCULO ---
@@ -185,7 +193,10 @@ def main():
                 fecha_liquidacion=f_liquidacion.strftime("%d/%m/%Y"),
                 incluir_sac_anterior=incluir_sac_ant,
                 art80=art80,
-                dto34=dto34
+                dto34=dto34,
+                art8_24013=art8_24013,
+                art15_24013=art15_24013,
+                pagos_a_cuenta=monto_pagos_cuenta
             )
             
             # --- VISUALIZACIÓN DE RESULTADOS ---
@@ -270,24 +281,35 @@ def main():
             if art80:
                 rubros.append(("Multa Art. 80 LCT", sueldo * 3))
 
+            # 14. Art. 8 Ley 24.013
+            if art8_24013:
+                total_meses_ui = anios * 12 + meses
+                rubros.append((f"Multa Art. 8º Ley 24.013 ({total_meses_ui} meses)", (total_meses_ui * sueldo) / 4))
+
+            # 15. Art. 15 Ley 24.013
+            if art15_24013:
+                monto_art15_ui = monto_245 + monto_preaviso + (monto_preaviso / 12) + monto_integracion + (monto_integracion / 12 if monto_integracion > 0 else 0)
+                rubros.append(("Multa Art. 15 Ley 24.013", monto_art15_ui))
+
             # Resto de rubros adicionales
             for c, m in otros_extras_visual:
                 rubros.append((c, m))
 
-            total_historico = sum(m for r, m in rubros)
+            total_rubros = sum(m for r, m in rubros)
+            
+            # Aplicar Pagos a Cuenta al Capital Histórico
+            capital_historico_neto = total_rubros - monto_pagos_cuenta
+            
+            total_historico = capital_historico_neto # Esta es la base para el cálculo de actualización
 
-            # Sumar rubros adicionales al display
-            if rubros_extras:
-                for c, m in rubros_extras:
-                    rubros.append((c, m))
-                    total_historico += m
+
 
             # Cálculo de actualización para visualización
             coef = ipc_fin / ipc_inicio
             capital_act = total_historico * coef
             
             # Cálculo exacto de días transcurridos
-            dias_pasados = max(0, (f_liquidacion - f_despido).days)
+            dias_pasados = max(0, (f_liquidacion - f_despido).days) + 1
             porcentaje_acumulado = dias_pasados * (0.03 / 365)
             int_puro = capital_act * porcentaje_acumulado
             
@@ -299,7 +321,12 @@ def main():
             with col_res2:
                 st.warning(f"**{texto_coef}** {coef:.4f}")
             with col_res3:
-                st.success(f"**{texto_cap}** ${(capital_act + int_puro):,.2f}")
+                total_final = capital_act + int_puro
+                st.success(f"**{texto_cap}** ${total_final:,.2f}")
+            
+            # Cálculo de Tope Mínimo (67%)
+            tope_minimo = total_final * 0.67
+            st.markdown(f"**Tope Mínimo (67% LCT):** ${tope_minimo:,.2f}")
 
             if aplicar_vizzoti:
                 if base_indem == sueldo * 0.67:
@@ -315,9 +342,16 @@ def main():
             with c_tabla:
                 # Crear DataFrame y agregar fila de Total
                 df_resumen = pd.DataFrame(rubros, columns=["Rubro", "Monto"])
-                # Agregar fila de total
-                df_total = pd.DataFrame([["TOTAL HISTÓRICO", total_historico]], columns=["Rubro", "Monto"])
-                df_final = pd.concat([df_resumen, df_total], ignore_index=True)
+                
+                # Fila de Subtotal si hay pagos a cuenta
+                if monto_pagos_cuenta > 0:
+                    df_subtotal = pd.DataFrame([["SUBTOTAL CAPITAL HISTÓRICO", total_rubros]], columns=["Rubro", "Monto"])
+                    df_pago = pd.DataFrame([["PAGOS A CUENTA (Al Despido)", -monto_pagos_cuenta]], columns=["Rubro", "Monto"])
+                    df_neto = pd.DataFrame([["CAPITAL HISTÓRICO NETO", capital_historico_neto]], columns=["Rubro", "Monto"])
+                    df_final = pd.concat([df_resumen, df_subtotal, df_pago, df_neto], ignore_index=True)
+                else:
+                    df_total = pd.DataFrame([["TOTAL HISTÓRICO", total_historico]], columns=["Rubro", "Monto"])
+                    df_final = pd.concat([df_resumen, df_total], ignore_index=True)
 
                 # Formatear Monto a string y generar HTML sin índice
                 df_final["Monto"] = df_final["Monto"].apply(lambda x: f"${x:,.2f}")
