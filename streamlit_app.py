@@ -44,12 +44,10 @@ st.write("")
 col1, col2 = st.columns(2)
 
 with col1:
-    if st.button("📄\nLiquidación por Despido", use_container_width=True):
-        st.switch_page("pages/1_Liquidacion_Despido.py")
+    st.page_link("pages/1_Liquidacion_Despido.py", label="📄  Liquidación por Despido", use_container_width=True)
 
 with col2:
-    if st.button("🏥\nRiesgos del Trabajo (Ley 24.557)", use_container_width=True):
-        st.switch_page("pages/2_Riesgos_Trabajo.py")
+    st.page_link("pages/2_Riesgos_Trabajo.py", label="🏥  Riesgos del Trabajo (Ley 24.557)", use_container_width=True)
 
 st.markdown("---")
 st.markdown(
