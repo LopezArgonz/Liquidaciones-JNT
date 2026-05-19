@@ -4,11 +4,12 @@ from dateutil.relativedelta import relativedelta
 import calendar
 import re
 import requests
-
 import io
 
+SERIE_ID_IPC = "145.3_INGNACNAL_DICI_M_15"  # IPC INDEC Nacional (Base 2016)
+
 class LiquidadorLaboral:
-    def __init__(self, caratula, ingreso, despido, sueldo, causa="Sin Causa", art1=False, art2=False, ipc_inicio=1.0, ipc_fin=1.0, aplicar_vizzoti=False, tope_cct=None, rubros_adicionales=None, fecha_liquidacion=None, incluir_sac_anterior=False, art80=False, dto34=False, art8_24013=False, art15_24013=False, pagos_a_cuenta=0.0):
+    def __init__(self, caratula, ingreso, despido, sueldo, causa="Sin Causa", art1=False, art2=False, ipc_inicio=1.0, ipc_fin=1.0, aplicar_vizzoti=False, tope_cct=None, rubros_adicionales=None, fecha_liquidacion=None, incluir_sac_anterior=False, art80=False, dto34=False, art8_24013=False, art15_24013=False, pagos_a_cuenta=0.0, art9_24013=False, fecha_registro=None, art10_24013=False, remuneracion_no_registrada=0.0, fecha_inicio_art10=None, fecha_fin_art10=None):
         self.caratula = caratula
         self.ingreso = datetime.strptime(ingreso, "%d/%m/%Y")
         self.despido = datetime.strptime(despido, "%d/%m/%Y")
@@ -22,6 +23,12 @@ class LiquidadorLaboral:
         self.art2 = art2
         self.art80 = art80
         self.art8_24013 = art8_24013
+        self.art9_24013 = art9_24013
+        self.fecha_registro = datetime.strptime(fecha_registro, "%d/%m/%Y") if fecha_registro else None
+        self.art10_24013 = art10_24013
+        self.remuneracion_no_registrada = remuneracion_no_registrada
+        self.fecha_inicio_art10 = datetime.strptime(fecha_inicio_art10, "%d/%m/%Y") if fecha_inicio_art10 else self.ingreso
+        self.fecha_fin_art10 = datetime.strptime(fecha_fin_art10, "%d/%m/%Y") if fecha_fin_art10 else self.despido
         self.art15_24013 = art15_24013
         self.dto34 = dto34
         self.ipc_inicio = ipc_inicio
@@ -132,7 +139,7 @@ class LiquidadorLaboral:
         ws.write('A3', 'FECHA DE LIQUIDACIÓN:', fmt_bold); ws.write('B3', self.hoy.strftime("%d/%m/%Y"), fmt_txt)
         ws.write('A4', 'MÉTODO ACTUALIZACIÓN:', fmt_bold); ws.write('B4', "IPC INDEC + 3% Anual", fmt_txt)
         
-        ws.write('A6', 'RUBRO (VALORES HISTÓRICOS)', fmt_tit); ws.write('B6', 'MONTO', fmt_tit)
+        ws.write('A6', 'RUBRO', fmt_tit); ws.write('B6', 'MONTO', fmt_tit)
 
         rubros = []
         total_historico = 0.0
@@ -243,6 +250,24 @@ class LiquidadorLaboral:
             rubros.append([f"Multa Art. 8º Ley 24.013 ({total_meses} meses)", monto_art8])
             total_historico += monto_art8
 
+        # Art. 9 Ley 24.013 (Registro tardío)
+        if self.art9_24013 and self.fecha_registro:
+            periodo_clandestino = relativedelta(self.fecha_registro, self.ingreso)
+            total_meses_art9 = periodo_clandestino.years * 12 + periodo_clandestino.months
+            if total_meses_art9 > 0:
+                monto_art9 = (total_meses_art9 * self.sueldo) / 4
+                rubros.append([f"Multa Art. 9º Ley 24.013 ({total_meses_art9} meses)", monto_art9])
+                total_historico += monto_art9
+
+        # Art. 10 Ley 24.013 (Remuneración no registrada)
+        if self.art10_24013 and self.remuneracion_no_registrada > 0:
+            periodo_art10 = relativedelta(self.fecha_fin_art10, self.fecha_inicio_art10)
+            total_meses_art10 = periodo_art10.years * 12 + periodo_art10.months
+            if total_meses_art10 > 0:
+                monto_art10 = (total_meses_art10 * self.remuneracion_no_registrada) / 4
+                rubros.append([f"Multa Art. 10 Ley 24.013 ({total_meses_art10} meses s/ ${self.remuneracion_no_registrada:,.2f})", monto_art10])
+                total_historico += monto_art10
+
         # 15. Art. 15 Ley 24.013 (Despido tras reclamo)
         if self.art15_24013:
             monto_art15 = monto_245 + monto_preaviso + (monto_preaviso / 12) + monto_integracion + (monto_integracion / 12 if monto_integracion > 0 else 0)
@@ -260,7 +285,7 @@ class LiquidadorLaboral:
             row += 1
 
         # Agregar el total histórico al final de los rubros
-        ws.write(row, 0, "Subtotal Capital Histórico:", fmt_bold); ws.write(row, 1, total_historico, fmt_int)
+        ws.write(row, 0, "Capital Histórico:", fmt_bold); ws.write(row, 1, total_historico, fmt_int)
         
         capital_neto = total_historico
         if self.pagos_a_cuenta > 0:
@@ -296,41 +321,44 @@ class LiquidadorLaboral:
         workbook.close()
         if not buffer:
              print(f"\n>>> ¡LIQUIDACIÓN CREADA CON ÉXITO! <<<")
-def obtener_datos_online(fecha_objetivo=None):
+def _obtener_serie(serie_id, fecha_objetivo=None):
     """
-    Obtiene datos de la API de Datos Argentina.
-    Devuelve el valor del índice IPC INDEC para la fecha despido/liquidación (o el último disponible si es None).
+    Cliente genérico para la API de Series de datos.gob.ar.
+    Devuelve (valor, fecha_str) o (None, None) si falla.
     """
     try:
         url = "https://apis.datos.gob.ar/series/api/series/"
-        id_serie = "145.3_INGNACNAL_DICI_M_15" # IPC INDEC Nacional (Base 2016)
-
-        params = {"ids": id_serie, "format": "json", "limit": 5000}
+        params = {"ids": serie_id, "format": "json", "limit": 5000}
         response = requests.get(url, params=params, timeout=10).json()
         data = response['data']
-        
-        if fecha_objetivo: # Usamos fecha_objetivo como "fecha objetivo" para IPC
+
+        if fecha_objetivo:
             f_dt = datetime.strptime(fecha_objetivo, "%d/%m/%Y")
             target = f_dt.strftime("%Y-%m-01")
             for entry in data:
-                if entry[0] == target: return entry[1], datetime.strptime(entry[0], "%Y-%m-%d").strftime("%d/%m/%Y")
-            
-            # Fallback: si la fecha_objetivo es más nueva que el último dato disponible, devuelve el último
+                if entry[0] == target:
+                    return entry[1], datetime.strptime(entry[0], "%Y-%m-%d").strftime("%d/%m/%Y")
+
+            # Si la fecha pedida es posterior al último dato disponible, devuelve el último
             last_entry = data[-1]
             last_dt = datetime.strptime(last_entry[0], "%Y-%m-%d")
             if f_dt >= last_dt:
                 return last_entry[1], last_dt.strftime("%d/%m/%Y")
-            
-            # Si es más vieja que el primer dato (muy raro), devuelve el primero
+
+            # Si es anterior al primer dato (muy raro), devuelve el primero
             return data[0][1], datetime.strptime(data[0][0], "%Y-%m-%d").strftime("%d/%m/%Y")
         else:
-            # Retorna último valor y fecha
             last_entry = data[-1]
             return last_entry[1], datetime.strptime(last_entry[0], "%Y-%m-%d").strftime("%d/%m/%Y")
 
     except Exception as e:
         print(f"Error API: {e}")
         return None, None
+
+
+def obtener_datos_online(fecha_objetivo=None):
+    """IPC INDEC Nacional. Wrapper retrocompatible sobre _obtener_serie."""
+    return _obtener_serie(SERIE_ID_IPC, fecha_objetivo)
 
 def solicitar_datos():
     print("\n" + "="*45 + "\n  LIQUIDADOR JUDICIAL - IPC INDEC\n" + "="*45)
