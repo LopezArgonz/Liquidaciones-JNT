@@ -64,9 +64,9 @@ class LiquidadorLaboral:
             return min(self.sueldo, self.tope_cct)
 
     def calcular_integracion_mes(self):
-        ultimo_dia = calendar.monthrange(self.despido.year, self.despido.month)[1]
-        dias_faltantes = ultimo_dia - self.despido.day
-        return (self.sueldo / 30) * dias_faltantes if self.causa == "Sin Causa" else 0
+        dias_mes = calendar.monthrange(self.despido.year, self.despido.month)[1]
+        dias_faltantes = dias_mes - self.despido.day
+        return (self.sueldo / dias_mes) * dias_faltantes if self.causa == "Sin Causa" else 0
 
     def calcular_sac_semestre_anterior(self):
         """Si se marca la opción, calcula el SAC adeudado del semestre anterior (Enero o Julio)."""
@@ -107,13 +107,8 @@ class LiquidadorLaboral:
         return monto_vac, proporcional_dias
 
     def calcular_dias_trabajados_mes_despido(self):
-        """Calcula el proporcional de días trabajados en el mes del despido"""
-        # Cantidad de días total del mes del despido
-        dias_totales_mes = calendar.monthrange(self.despido.year, self.despido.month)[1]
-        dia_despido = self.despido.day
-        
-        # Proporcional: (Sueldo / Días del mes) * Días trabajados (incluye día despido)
-        return (self.sueldo / dias_totales_mes) * dia_despido
+        dias_mes = calendar.monthrange(self.despido.year, self.despido.month)[1]
+        return (self.sueldo / dias_mes) * self.despido.day
 
     def generar_excel(self, buffer=None):
         if buffer:

@@ -3,3 +3,6 @@ pandas
 XlsxWriter
 python-dateutil
 requests
+streamlit-authenticator==0.3.3
+PyYAML
+bcrypt

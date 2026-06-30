@@ -13,3 +13,6 @@ venv.bak/
 
 # Generated excel files
 *.xlsx
+
+# Credenciales de usuarios (NO subir a GitHub)
+config.yaml
