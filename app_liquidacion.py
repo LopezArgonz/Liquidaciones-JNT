@@ -110,7 +110,7 @@ class LiquidadorLaboral:
         dias_mes = calendar.monthrange(self.despido.year, self.despido.month)[1]
         return (self.sueldo / dias_mes) * self.despido.day
 
-    def generar_excel(self, buffer=None):
+    def generar_excel(self, buffer=None, fecha_ipc_ini=None, fecha_ipc_fin=None):
         if buffer:
             writer = pd.ExcelWriter(buffer, engine='xlsxwriter')
         else:
@@ -127,14 +127,25 @@ class LiquidadorLaboral:
         fmt_bold = workbook.add_format({'bold': True, 'border': 1})
         fmt_int = workbook.add_format({'bold': True, 'bg_color': '#EBF1DE', 'border': 1, 'num_format': '$#,##0.00'})
 
-        ws.set_column('A:A', 50); ws.set_column('B:B', 25)
+        ws.set_column('A:A', 55); ws.set_column('B:B', 25)
 
-        ws.write('A1', 'EXPEDIENTE:', fmt_bold); ws.write('B1', self.caratula, fmt_txt)
-        ws.write('A2', 'FECHA DE DESPIDO:', fmt_bold); ws.write('B2', self.despido.strftime("%d/%m/%Y"), fmt_txt)
-        ws.write('A3', 'FECHA DE LIQUIDACIÓN:', fmt_bold); ws.write('B3', self.hoy.strftime("%d/%m/%Y"), fmt_txt)
-        ws.write('A4', 'MÉTODO ACTUALIZACIÓN:', fmt_bold); ws.write('B4', "IPC INDEC + 3% Anual", fmt_txt)
-        
-        ws.write('A6', 'RUBRO', fmt_tit); ws.write('B6', 'MONTO', fmt_tit)
+        antiguedad = relativedelta(self.despido, self.ingreso)
+        ant_str = f"{antiguedad.years} años, {antiguedad.months} meses"
+
+        label_ipc_ini = f"IPC Inicio ({fecha_ipc_ini})" if fecha_ipc_ini else "IPC Inicio (mes despido)"
+        label_ipc_fin = f"IPC Cierre ({fecha_ipc_fin})" if fecha_ipc_fin else "IPC Cierre (liquidación)"
+
+        ws.write('A1', 'EXPEDIENTE:', fmt_bold);          ws.write('B1', self.caratula, fmt_txt)
+        ws.write('A2', 'FECHA DE INGRESO:', fmt_bold);    ws.write('B2', self.ingreso.strftime("%d/%m/%Y"), fmt_txt)
+        ws.write('A3', 'FECHA DE DESPIDO:', fmt_bold);    ws.write('B3', self.despido.strftime("%d/%m/%Y"), fmt_txt)
+        ws.write('A4', 'ANTIGÜEDAD:', fmt_bold);          ws.write('B4', ant_str, fmt_txt)
+        ws.write('A5', 'MEJOR REMUNERACIÓN:', fmt_bold);  ws.write('B5', self.sueldo, fmt_mon)
+        ws.write('A6', 'FECHA DE LIQUIDACIÓN:', fmt_bold); ws.write('B6', self.hoy.strftime("%d/%m/%Y"), fmt_txt)
+        ws.write('A7', label_ipc_ini + ':', fmt_bold);   ws.write('B7', self.ipc_inicio, workbook.add_format({'num_format': '0.0000', 'border': 1}))
+        ws.write('A8', label_ipc_fin + ':', fmt_bold);   ws.write('B8', self.ipc_fin, workbook.add_format({'num_format': '0.0000', 'border': 1}))
+        ws.write('A9', 'MÉTODO ACTUALIZACIÓN:', fmt_bold); ws.write('B9', "IPC INDEC + 3% Anual", fmt_txt)
+
+        ws.write('A11', 'RUBRO', fmt_tit); ws.write('B11', 'MONTO', fmt_tit)
 
         rubros = []
         total_historico = 0.0
@@ -274,7 +285,7 @@ class LiquidadorLaboral:
             rubros.append([concepto, monto])
             total_historico += monto
 
-        row = 7
+        row = 12
         for lab, mon in rubros:
             ws.write(row, 0, lab, fmt_txt); ws.write(row, 1, mon, fmt_mon)
             row += 1
@@ -294,22 +305,16 @@ class LiquidadorLaboral:
         
         ws.write(row, 0, "ACTUALIZACIÓN E INTERESES (Fuente: IPC INDEC)", fmt_tit)
         ws.write(row, 1, "", fmt_tit)
-        
-        cap_act = 0.0
-        int_puro = 0.0
-        
-        # Actualización por IPC + 3%
+
         coef = self.ipc_fin / self.ipc_inicio
         cap_act = capital_neto * coef
-        
-        # Cálculo exacto de días transcurridos
         dias_pasados = max(0, (self.hoy - self.despido).days) + 1
-        porcentaje_acumulado = dias_pasados * (0.03 / 365) # 3% anual equivale a 3/365% diario aproximadamente 0.0082191780821918%
+        porcentaje_acumulado = dias_pasados * (0.03 / 365)
         int_puro = cap_act * porcentaje_acumulado
 
         ws.write(row+1, 0, "Coeficiente IPC INDEC:", fmt_txt); ws.write(row+1, 1, coef, workbook.add_format({'num_format': '0.0000', 'border': 1}))
         ws.write(row+2, 0, "CAPITAL ACTUALIZADO (IPC):", fmt_bold); ws.write(row+2, 1, cap_act, fmt_mon)
-        ws.write(row+3, 0, f"Interés Puro (3% anual - {dias_pasados} días - {porcentaje_acumulado*100:.2f}% acumulado):", fmt_txt); ws.write(row+3, 1, int_puro, fmt_mon)
+        ws.write(row+3, 0, f"Interés Puro (3% anual — {dias_pasados} días — {porcentaje_acumulado*100:.2f}% acumulado):", fmt_txt); ws.write(row+3, 1, int_puro, fmt_mon)
         ws.write(row+5, 0, "TOTAL FINAL (Capital Actualizado + Int. 3%):", fmt_int); ws.write(row+5, 1, cap_act + int_puro, fmt_int)
         ws.write(row+6, 0, "TOPE MÍNIMO (67% s/ Total Actualizado):", fmt_txt); ws.write(row+6, 1, (cap_act + int_puro) * 0.67, fmt_mon)
         

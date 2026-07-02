@@ -4,6 +4,7 @@ import pandas as pd
 from datetime import date, datetime
 from dateutil.relativedelta import relativedelta
 from app_lrt import CalculadoraLRT, cargar_ripte_seed, cargar_pisos
+from utils import aplicar_estilos, aplicar_estilos_tabla, mostrar_footer
 
 st.set_page_config(
     page_title="Riesgos del Trabajo - Liquidaciones JNT",
@@ -12,29 +13,8 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-st.markdown("""
-    <style>
-    .main { background-color: #f8f9fa; }
-    h1 { color: #2c3e50; }
-    .stButton>button {
-        background-color: #2c3e50;
-        color: white;
-        border-radius: 8px;
-        width: 100%;
-        border: none;
-        padding: 0.5rem 1rem;
-        font-weight: 500;
-        transition: all 0.3s ease;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-    .stButton>button:hover {
-        background-color: #34495e;
-        box-shadow: 0 4px 8px rgba(0,0,0,0.15);
-        transform: translateY(-1px);
-    }
-    .stButton>button:active { transform: translateY(0px); }
-    </style>
-    """, unsafe_allow_html=True)
+aplicar_estilos()
+aplicar_estilos_tabla()
 
 
 def _cargar_ripte_inicial():
@@ -102,7 +82,15 @@ def main():
         modo = st.radio(
             "Ingresar IBM como:",
             ["IBM Directo (Modo A)", "Promedio de Salarios (Modo B)"],
-            key="lrt_modo"
+            key="lrt_modo",
+            help=(
+                "**Modo A:** usar cuando el IBM (Ingreso Base Mensual) ya fue determinado "
+                "judicialmente o consta en la pericia contable como un valor único. "
+                "Se actualiza por RIPTE entre accidente y sentencia.\n\n"
+                "**Modo B:** usar cuando se reconstruye el IBM desde los 12 salarios del "
+                "año previo al accidente. Cada salario se actualiza por RIPTE hasta el mes "
+                "del accidente y luego se promedian."
+            )
         )
 
         ibm_historico = None
@@ -209,28 +197,32 @@ def main():
                     st.warning("Complete el período y el valor antes de agregar.")
 
         st.markdown("---")
-        st.markdown(
-            "<div style='text-align: center; color: #888; font-size: 0.85rem; margin-top: 20px;'>"
-            "Desarrollado por: <br><b>Gastón López Argonz</b>"
-            "</div>",
-            unsafe_allow_html=True
-        )
+        mostrar_footer()
 
     # ── LÓGICA DE CÁLCULO ────────────────────────────────────────────────────
     listo_a = (modo == "IBM Directo (Modo A)" and ibm_historico is not None and ibm_historico > 0)
-    listo_b = (modo == "Promedio de Salarios (Modo B)" and salarios)
+    listo_b_parcial = (modo == "Promedio de Salarios (Modo B)" and salarios)
+    listo_b = listo_b_parcial and len(salarios) == 12
 
     if incapacidad <= 0:
         st.info("Ingrese el porcentaje de incapacidad y los datos del caso para calcular.")
         return
 
-    if not listo_a and not listo_b:
+    if not listo_a and not listo_b_parcial:
         msg = (
             "Ingrese el IBM Histórico para calcular."
             if modo == "IBM Directo (Modo A)"
             else "Ingrese al menos un salario en la tabla para calcular."
         )
         st.info(msg)
+        return
+
+    if listo_b_parcial and not listo_b:
+        n_sal = len(salarios)
+        st.warning(
+            f"⚠️ Se ingresaron {n_sal} salario{'s' if n_sal != 1 else ''} con importe mayor a cero. "
+            f"Se requieren exactamente 12 para calcular el IBM promedio."
+        )
         return
 
     try:
@@ -311,7 +303,7 @@ def main():
                 )
                 c_sal, _ = st.columns([0.75, 0.25])
                 with c_sal:
-                    html_sal = df_sal.to_html(index=False, classes="table-lrt", border=0, justify="center")
+                    html_sal = df_sal.to_html(index=False, classes="table-jnt", border=0, justify="center")
                     st.markdown(html_sal, unsafe_allow_html=True)
 
             st.markdown("---")
@@ -348,39 +340,7 @@ def main():
 
         c_tabla, _ = st.columns([0.65, 0.35])
         with c_tabla:
-            st.markdown("""
-            <style>
-            .table-lrt {
-                width: 100% !important;
-                border-collapse: collapse !important;
-                font-family: sans-serif;
-                font-size: 0.9rem;
-                color: inherit !important;
-            }
-            .table-lrt thead tr th {
-                text-align: center !important;
-                background-color: rgba(128, 128, 128, 0.15);
-                padding: 10px;
-                border-bottom: 2px solid rgba(128, 128, 128, 0.3);
-                color: inherit !important;
-            }
-            .table-lrt tbody tr td {
-                padding: 10px;
-                border-bottom: 1px solid rgba(128, 128, 128, 0.1);
-                color: inherit !important;
-            }
-            .table-lrt tbody tr td:nth-child(2) {
-                text-align: right !important;
-                white-space: nowrap;
-            }
-            .table-lrt tbody tr:last-child {
-                font-weight: bold;
-                background-color: rgba(128, 128, 128, 0.1);
-                border-top: 2px solid rgba(128, 128, 128, 0.3);
-            }
-            </style>
-            """, unsafe_allow_html=True)
-            html = df_tabla.to_html(index=False, classes="table-lrt", border=0, justify="center")
+            html = df_tabla.to_html(index=False, classes="table-jnt", border=0, justify="center")
             st.markdown(html, unsafe_allow_html=True)
 
         # ── DESCARGA EXCEL ───────────────────────────────────────────────────

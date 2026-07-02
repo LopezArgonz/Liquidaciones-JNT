@@ -2,6 +2,7 @@ import json
 import re
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
+from functools import lru_cache
 import requests
 import pandas as pd
 
@@ -14,11 +15,13 @@ SERIE_ID_RIPTE = "158.1_REPTE_0_0_5"  # RIPTE mensual — Secretaría de Trabajo
 # Carga de datos de referencia
 # ---------------------------------------------------------------------------
 
+@lru_cache(maxsize=1)
 def cargar_pisos(path="data/pisos.json"):
     with open(path, encoding="utf-8") as f:
         return json.load(f)
 
 
+@lru_cache(maxsize=1)
 def cargar_ripte_seed(path="data/ripte_seed.json"):
     with open(path, encoding="utf-8") as f:
         seed = json.load(f)
@@ -94,6 +97,10 @@ class CalculadoraLRT:
         tiene_salarios = len(self.salarios) > 0
         if tiene_ibm == tiene_salarios:
             raise ValueError("Provea IBM histórico O salarios mensuales, no ambos ni ninguno.")
+        if self.fecha_accidente <= self.fecha_nacimiento:
+            raise ValueError("La fecha del accidente debe ser posterior a la fecha de nacimiento.")
+        if self.fecha_sentencia < self.fecha_accidente:
+            raise ValueError("La fecha de sentencia no puede ser anterior a la fecha del accidente.")
 
     # --- Helpers -----------------------------------------------------------
 
@@ -150,6 +157,10 @@ class CalculadoraLRT:
         """Modo B: promedio de los 12 salarios actualizados al mes del accidente por RIPTE."""
         if self.ibm_historico is not None:
             return None
+        if len(self.salarios) != 12:
+            raise ValueError(
+                f"Se requieren exactamente 12 salarios para calcular el IBM (se ingresaron {len(self.salarios)})."
+            )
         ripte_acc = self.ripte_accidente()
         suma = 0.0
         for s in self.salarios:
@@ -260,25 +271,37 @@ class CalculadoraLRT:
         fmt_tot = wb.add_format({"bold": True, "bg_color": "#EBF1DE", "border": 1, "num_format": "$#,##0.00"})
         fmt_num4 = wb.add_format({"num_format": "0.0000", "border": 1})
 
-        ws.set_column("A:A", 55)
+        ws.set_column("A:A", 58)
         ws.set_column("B:B", 25)
 
         d = self.desglose()
 
-        ws.write("A1", "EXPEDIENTE:", fmt_bold);       ws.write("B1", self.caratula, fmt_txt)
-        ws.write("A2", "FECHA DEL ACCIDENTE:", fmt_bold); ws.write("B2", self.fecha_accidente.strftime("%d/%m/%Y"), fmt_txt)
-        ws.write("A3", "FECHA DE SENTENCIA:", fmt_bold);  ws.write("B3", self.fecha_sentencia.strftime("%d/%m/%Y"), fmt_txt)
-        ws.write("A4", "% INCAPACIDAD:", fmt_bold);    ws.write("B4", f"{self.incapacidad_pct:.2f}%", fmt_txt)
+        periodo_sent_real = datetime.strptime(d["ripte_sentencia_periodo_real"], "%Y-%m-%d").strftime("%m/%Y")
+        label_ripte_sent = (
+            f"RIPTE mes de sentencia ({periodo_sent_real} — último publicado)"
+            if d["ripte_sentencia_fallback"]
+            else f"RIPTE mes de sentencia ({periodo_sent_real})"
+        )
 
-        ws.write("A6", "CONCEPTO", fmt_tit); ws.write("B6", "MONTO / VALOR", fmt_tit)
+        ws.write("A1", "EXPEDIENTE:", fmt_bold);          ws.write("B1", self.caratula, fmt_txt)
+        ws.write("A2", "FECHA DE NACIMIENTO:", fmt_bold); ws.write("B2", self.fecha_nacimiento.strftime("%d/%m/%Y"), fmt_txt)
+        ws.write("A3", "FECHA DEL ACCIDENTE:", fmt_bold); ws.write("B3", self.fecha_accidente.strftime("%d/%m/%Y"), fmt_txt)
+        ws.write("A4", "FECHA DE SENTENCIA:", fmt_bold);  ws.write("B4", self.fecha_sentencia.strftime("%d/%m/%Y"), fmt_txt)
+        ws.write("A5", "% INCAPACIDAD:", fmt_bold);       ws.write("B5", f"{self.incapacidad_pct:.2f}%", fmt_txt)
+
+        ws.write("A7", "CONCEPTO", fmt_tit); ws.write("B7", "MONTO / VALOR", fmt_tit)
+
+        ibm_inicial = self.ibm_historico if self.ibm_historico is not None else d["ibm_promedio_en_accidente"]
+        label_ibm_inicial = "IBM Histórico (ingresado)" if self.ibm_historico is not None else "IBM Promedio al accidente (Modo B)"
 
         filas = [
             ("Edad al accidente (años)", d["edad"]),
             ("Coeficiente de edad (65 / edad)", d["coef_edad"]),
             ("RIPTE mes del accidente", d["ripte_accidente"]),
-            ("RIPTE mes de sentencia", d["ripte_sentencia"]),
+            (label_ripte_sent, d["ripte_sentencia"]),
             ("Coeficiente RIPTE (sent. / acc.)", d["coef_ripte"]),
-            ("IBM actualizado", d["ibm_actualizado"]),
+            (label_ibm_inicial, ibm_inicial),
+            ("IBM actualizado a sentencia", d["ibm_actualizado"]),
             ("Indemnización base (art. 14.2.a Ley 24.557)", d["indemnizacion_base"]),
             ("Adicional art. 3 Ley 26.773 (20%)", d["adicional_art3"]),
             ("Subtotal LRT", d["subtotal_lrt"]),
@@ -286,7 +309,7 @@ class CalculadoraLRT:
             (f"Piso aplicable ({self.incapacidad_pct:.2f}% del piso)", d["piso_aplicable"]),
         ]
 
-        row = 7
+        row = 8
         for lab, val in filas:
             ws.write(row, 0, lab, fmt_txt)
             if isinstance(val, int):
@@ -301,6 +324,34 @@ class CalculadoraLRT:
         aplica = "PISO LEGAL" if d["aplica_piso"] else "SUBTOTAL LRT"
         ws.write(row, 0, f"CAPITAL FINAL (aplica {aplica}):", fmt_bold)
         ws.write(row, 1, d["capital_final"], fmt_tot)
+
+        # Hoja de detalle de salarios (solo Modo B)
+        if self.ibm_historico is None:
+            detalle = self.detalle_salarios_actualizados()
+            if detalle:
+                ws2 = wb.add_worksheet("Detalle Salarios")
+                ws2.set_column("A:A", 20)
+                ws2.set_column("B:F", 20)
+
+                fmt_tit2 = wb.add_format({"bold": True, "bg_color": "#2F5597", "font_color": "white",
+                                          "border": 1, "align": "center"})
+                encabezados = ["Período", "Salario histórico ($)", "RIPTE del mes",
+                               "RIPTE al accidente", "Coeficiente", "Salario actualizado ($)"]
+                for col, h in enumerate(encabezados):
+                    ws2.write(0, col, h, fmt_tit2)
+
+                for r, row_d in enumerate(detalle, start=1):
+                    ws2.write(r, 0, row_d["periodo"], fmt_txt)
+                    ws2.write(r, 1, row_d["historico"], fmt_mon)
+                    ws2.write(r, 2, row_d["ripte_mes"], fmt_mon)
+                    ws2.write(r, 3, row_d["ripte_acc"], fmt_mon)
+                    ws2.write(r, 4, row_d["coef"], fmt_num4)
+                    ws2.write(r, 5, row_d["actualizado"], fmt_mon)
+
+                # Fila de IBM promedio
+                r_ibm = len(detalle) + 1
+                ws2.write(r_ibm, 0, f"IBM Promedio (÷ {len(detalle)})", fmt_bold)
+                ws2.write(r_ibm, 5, d["ibm_promedio_en_accidente"], fmt_tot)
 
         wb.close()
         if not buffer:
