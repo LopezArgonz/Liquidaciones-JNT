@@ -7,7 +7,9 @@
 Aplicación Streamlit para la Justicia Nacional del Trabajo (Argentina) que calcula liquidaciones laborales y las exporta a Excel. Hoy tiene dos secciones:
 
 1. **Liquidación por Despido** — funcional. Calcula art. 245 LCT, integración mes despido, SAC, vacaciones, multas (25.323, 24.013, art. 80, Dto. 34/2019), aplica Vizzoti, actualiza por IPC INDEC + 3% anual de interés puro.
-2. **Riesgos del Trabajo (Ley 24.557)** — **pendiente de desarrollo**. Hay placeholder en `pages/2_Riesgos_Trabajo.py`. Toda la especificación, datos de referencia y plan están en `docs/lrt/`. Leerlos antes de tocar nada acá.
+2. **Riesgos del Trabajo (Ley 24.557)** — funcional. `app_lrt.py` / `CalculadoraLRT`: art. 14.2.a, adicional art. 3 Ley 26.773, pisos legales, actualización por RIPTE (Modo A: IBM directo: Modo B: promedio de 12 salarios). Detalle original en `docs/lrt/`.
+
+Ambas páginas comparten el **design system institucional** de `utils.py` (ver sección propia más abajo) y ambas clases exponen su cálculo completo a través de un único método (`calcular_rubros()` / `desglose()`) que UI y Excel consumen por igual.
 
 ## Stack y convenciones
 
@@ -28,6 +30,23 @@ Aplicación Streamlit para la Justicia Nacional del Trabajo (Argentina) que calc
 | Estilo Streamlit | Bloques `st.markdown` con CSS inline (mantener look & feel existente) |
 | Patrón de cálculo | **Clase monolítica** que recibe inputs en el constructor y expone métodos `calcular_X()`. Ejemplo: `LiquidadorLaboral`. |
 | Patrón de API | **Función suelta** que devuelve `(valor, fecha_str)` o `(None, None)`. Ejemplo: `obtener_datos_online`. |
+
+## Design system (utils.py)
+
+`utils.py` es el mini design-system institucional del proyecto (marfil / azul medianoche / dorado judicial, tipografía serif en títulos). **Toda página nueva o modificada debe usarlo** — no reintroducir CSS inline suelto, colores hardcodeados fuera de la paleta, ni emojis en la UI (la iconografía es SVG monocromo).
+
+- **Paleta** (variables CSS en `CSS_BASE`, también documentadas en `.streamlit/config.toml`): `--jnt-azul` `#1F2A38`, `--jnt-azul-claro` `#2C3E50`, `--jnt-dorado` `#B8860B`, `--jnt-dorado-suave` `#C9A227`, `--jnt-marfil` `#FAF8F3`, `--jnt-marfil-oscuro` `#EFEBE2`, `--jnt-borde` `#D8D2C4`, `--jnt-exito` `#2E6B4F`, `--jnt-alerta` `#8C2F39`.
+- **Iconografía SVG** (currentColor, sin emojis): `icono_balanza`, `icono_legajo`, `icono_cruz`, `icono_columna`, `icono_toga`, `icono_descarga`.
+- **Componentes**: `aplicar_estilos()` / `aplicar_estilos_tabla()` (llamar siempre al principio de cada página), `encabezado_institucional(titulo, subtitulo)`, `tarjeta_metrica(label, valor, tono)`, `chip_norma(texto, url=None)` (badge con link a InfoLEG), `sello_fuente(texto)` (cita de fuente de índices), `caja_monto_letras(texto)`, `alerta(texto)` (reemplaza `st.error`/`st.warning` para validaciones — bordó, no el rojo default), `mostrar_footer()`.
+- `VERSION = "2.0"` en `utils.py` es la versión de la app; se usa en el footer y en el pie de página de los Excel.
+- Clase de tabla `table-jnt`: filas de sección con `class="jnt-seccion"` (usar `<td colspan="2">§ NOMBRE</td>`) y la fila de total como la última `<tr>` de la tabla (recibe automáticamente el doble borde superior).
+- CSS de impresión (`@media print`) ya oculta sidebar/botones/header; no duplicar esa lógica en las páginas.
+
+## Única fuente de verdad de los rubros
+
+- `LiquidadorLaboral.calcular_rubros()` (en `app_liquidacion.py`) es el **único** lugar que arma la lista de rubros del despido. Devuelve `{"rubros": [(seccion, label, monto), ...], "total_historico", "capital_neto", "coef", "capital_actualizado", "dias", "interes_puro", "total_final"}`, con `seccion ∈ {"indemnizatorios", "salariales", "multas", "adicionales"}`. Tanto `generar_excel()` como `pages/1_Liquidacion_Despido.py` lo consumen exclusivamente — **no** reconstruir la lista de rubros a mano en ningún lugar nuevo.
+- El equivalente en LRT es `CalculadoraLRT.desglose()` (en `app_lrt.py`).
+- Ambas clases exponen además `texto_sentencia()`, que arma la redacción en prosa judicial (usa `monto_en_letras()` de `utils.py`) lista para copiar a un proyecto de sentencia.
 
 ## Estructura actual
 
