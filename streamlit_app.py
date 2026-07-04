@@ -7,7 +7,7 @@ from app_liquidacion import obtener_datos_online, cargar_ipc_seed
 from app_lrt import cargar_ripte_seed
 from utils import (
     aplicar_estilos, mostrar_footer, alerta, encabezado_institucional,
-    icono_balanza, icono_toga, icono_columna, icono_cruz,
+    icono_balanza, icono_toga, icono_columna, icono_cruz, icono_libro,
 )
 
 st.set_page_config(
@@ -80,8 +80,9 @@ authenticator.login()
 if st.session_state.get("authentication_status") is True:
     branding_placeholder.empty()
 
-    p_despido = st.Page("pages/1_Liquidacion_Despido.py", title="Liquidación por Despido")
-    p_lrt     = st.Page("pages/2_Riesgos_Trabajo.py",    title="Riesgos del Trabajo (Ley 24.557)")
+    p_despido    = st.Page("pages/1_Liquidacion_Despido.py", title="Liquidación por Despido")
+    p_lrt        = st.Page("pages/2_Riesgos_Trabajo.py",    title="Riesgos del Trabajo (Ley 24.557)")
+    p_biblioteca = st.Page("pages/3_Biblioteca_Legal.py",   title="Biblioteca de Leyes")
 
     def pagina_inicio():
         aplicar_estilos()
@@ -94,7 +95,7 @@ if st.session_state.get("authentication_status") is True:
             unsafe_allow_html=True,
         )
 
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         with col1:
             _tarjeta_herramienta(
                 "LCT — DESPIDO", icono_columna(40), "Liquidación por Despido",
@@ -106,6 +107,12 @@ if st.session_state.get("authentication_status") is True:
                 "LRT — LEY 24.557", icono_cruz(40), "Riesgos del Trabajo",
                 "Prestación dineraria por incapacidad permanente parcial, actualizada por RIPTE.",
                 p_lrt,
+            )
+        with col3:
+            _tarjeta_herramienta(
+                "BIBLIOTECA", icono_libro(40), "Biblioteca de Leyes",
+                "Legislación aplicable con enlace a InfoLEG (próximamente, jurisprudencia).",
+                p_biblioteca,
             )
 
         st.markdown("---")
@@ -140,10 +147,16 @@ if st.session_state.get("authentication_status") is True:
         with col_i2:
             st.page_link(p_lrt, label="Riesgos del Trabajo")
 
+        col_i1, col_i2 = st.columns([1, 6])
+        with col_i1:
+            st.markdown(icono_libro(18), unsafe_allow_html=True)
+        with col_i2:
+            st.page_link(p_biblioteca, label="Biblioteca de Leyes")
+
         st.markdown("---")
 
     p_inicio = st.Page(pagina_inicio, title="Inicio", default=True)
-    pg = st.navigation([p_inicio, p_despido, p_lrt], position="hidden")
+    pg = st.navigation([p_inicio, p_despido, p_lrt, p_biblioteca], position="hidden")
     pg.run()
 
 else:

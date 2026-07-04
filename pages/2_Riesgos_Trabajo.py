@@ -10,10 +10,6 @@ from utils import (
     caja_monto_letras, alerta, monto_en_letras,
 )
 
-# Enlaces oficiales InfoLEG
-LEY_24557 = "https://servicios.infoleg.gob.ar/infolegInternet/verNorma.do?id=27971"
-LEY_26773 = "https://servicios.infoleg.gob.ar/infolegInternet/verNorma.do?id=203798"
-
 st.set_page_config(
     page_title="Riesgos del Trabajo - Liquidaciones JNT",
     page_icon="logo.png",
@@ -37,10 +33,6 @@ def main():
     encabezado_institucional(
         "Riesgos del Trabajo",
         "Ley 24.557 · art. 3 Ley 26.773 — Prestación Dineraria por Incapacidad Permanente Parcial",
-    )
-    st.markdown(
-        chip_norma("Ley 24.557 (InfoLEG)", LEY_24557) + " " + chip_norma("Ley 26.773 (InfoLEG)", LEY_26773),
-        unsafe_allow_html=True,
     )
 
     # ── SIDEBAR: EXPEDIENTE POR PASOS ─────────────────────────────────────────

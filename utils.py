@@ -305,6 +305,17 @@ CSS_TABLA = """
     font-weight: bold;
     background-color: rgba(184, 134, 11, 0.08);
 }
+
+/* Variante para listados genéricos (sin fila de total) — cancela el
+   estilo de "última fila = total" de .table-jnt para listas simples. */
+.table-jnt-lista tbody tr:last-child td {
+    font-weight: normal;
+    background-color: transparent;
+    border-top: 1px solid var(--jnt-borde, rgba(128,128,128,0.2));
+}
+.table-jnt-lista tbody tr:nth-child(even) td {
+    background-color: rgba(184, 134, 11, 0.04);
+}
 </style>
 """
 
@@ -376,6 +387,15 @@ def icono_toga(size=20):
         <circle cx="12" cy="7" r="3.2"/>
         <path d="M5 21c0-4.5 3-7 7-7s7 2.5 7 7"/>
         <line x1="12" y1="14" x2="12" y2="21"/>
+    </svg>"""
+
+
+def icono_libro(size=24):
+    """Biblioteca de leyes / jurisprudencia."""
+    return f"""<svg width="{size}" height="{size}" viewBox="0 0 24 24" fill="none"
+        stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 4.5c2-1 5-1 7 0v15c-2-1-5-1-7 0Z"/>
+        <path d="M20 4.5c-2-1-5-1-7 0v15c2-1 5-1 7 0Z"/>
     </svg>"""
 
 

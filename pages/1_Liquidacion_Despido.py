@@ -5,15 +5,9 @@ import io
 from app_liquidacion import LiquidadorLaboral, obtener_datos_online, cargar_ipc_seed
 from utils import (
     aplicar_estilos, aplicar_estilos_tabla, mostrar_footer, sanitizar_nombre,
-    encabezado_institucional, tarjeta_metrica, chip_norma, sello_fuente,
+    encabezado_institucional, tarjeta_metrica, sello_fuente,
     caja_monto_letras, alerta, monto_en_letras,
 )
-
-# Enlaces oficiales InfoLEG citados en la etapa de multas y leyes especiales
-LEY_25323 = "https://servicios.infoleg.gob.ar/infolegInternet/verNorma.do?id=64555"
-LEY_24013 = "https://servicios.infoleg.gob.ar/infolegInternet/verNorma.do?id=412"
-LCT_20744 = "https://servicios.infoleg.gob.ar/infolegInternet/verNorma.do?id=25552"
-DTO_34_2019 = "https://servicios.infoleg.gob.ar/infolegInternet/anexos/330000-334999/333435/norma.htm"
 
 SECCION_LABELS = {
     "indemnizatorios": "§ RUBROS INDEMNIZATORIOS",
@@ -108,19 +102,15 @@ def main():
         with st.expander("III · Multas e incrementos", expanded=False):
             art1 = st.checkbox("Art. 1° Ley 25.323", value=False, key="art1",
                                help="Relación no registrada: duplica la indemnización por antigüedad.")
-            st.markdown(chip_norma("Ley 25.323 (InfoLEG)", LEY_25323), unsafe_allow_html=True)
 
             art2 = st.checkbox("Art. 2° Ley 25.323", value=False, key="art2",
                                help="Falta de pago a tiempo: 50% sobre art. 245 + preaviso + integración.")
-            st.markdown(chip_norma("Ley 25.323 (InfoLEG)", LEY_25323), unsafe_allow_html=True)
 
             art8_24013 = st.checkbox("Art. 8° Ley 24.013", value=False, key="art8_24013",
                                      help="Relación no registrada: 25% del total de remuneraciones por el período no registrado.")
-            st.markdown(chip_norma("Ley 24.013 (InfoLEG)", LEY_24013), unsafe_allow_html=True)
 
             art9_24013 = st.checkbox("Art. 9° Ley 24.013", value=False, key="art9",
                                      help="Registro tardío: 25% de las remuneraciones devengadas desde el ingreso hasta el registro.")
-            st.markdown(chip_norma("Ley 24.013 (InfoLEG)", LEY_24013), unsafe_allow_html=True)
             fecha_registro = None
             if art9_24013:
                 fecha_registro = st.date_input("Fecha de Registro", value=f_ingreso,
@@ -129,7 +119,6 @@ def main():
 
             art10_24013 = st.checkbox("Art. 10 Ley 24.013", value=False, key="art10",
                                       help="Remuneración no registrada: 25% de la diferencia salarial no registrada.")
-            st.markdown(chip_norma("Ley 24.013 (InfoLEG)", LEY_24013), unsafe_allow_html=True)
             remuneracion_no_registrada = 0.0
             fecha_inicio_art10 = None
             fecha_fin_art10 = None
@@ -148,15 +137,12 @@ def main():
 
             art15_24013 = st.checkbox("Art. 15 Ley 24.013", value=False, key="art15_24013",
                                       help="Despido tras intimación de registro: duplica la indemnización.")
-            st.markdown(chip_norma("Ley 24.013 (InfoLEG)", LEY_24013), unsafe_allow_html=True)
 
             art80 = st.checkbox("Art. 80 LCT", value=False, key="art80",
                                 help="Falta de entrega de certificados de trabajo: 3 sueldos.")
-            st.markdown(chip_norma("LCT (InfoLEG)", LCT_20744), unsafe_allow_html=True)
 
             dto34 = st.checkbox("Dto. 34/2019 (Doble Indemnización)", value=False, key="dto34",
                                 help="Incremento indemnizatorio del 100% sobre los rubros indemnizatorios.")
-            st.markdown(chip_norma("Dto. 34/2019 (InfoLEG)", DTO_34_2019), unsafe_allow_html=True)
 
         with st.expander("IV · Vizzoti y rubros adicionales", expanded=False):
             st.markdown("**Fallo Vizzoti**")
