@@ -252,6 +252,25 @@ class CalculadoraLRT:
             "capital_final": self.capital_final(),
         }
 
+    def texto_sentencia(self):
+        """Redacción en prosa judicial de la liquidación LRT, lista para copiar a la sentencia."""
+        from utils import monto_en_letras
+
+        d = self.desglose()
+        texto = (
+            f"Conforme surge de la liquidación practicada, correspondiente a una incapacidad del "
+            f"{self.incapacidad_pct:.2f}% y una edad de {d['edad']} años al momento del accidente, "
+            f"corresponde condenar al pago de la suma de $ {d['capital_final']:,.2f} "
+            f"({monto_en_letras(d['capital_final'])}), comprensiva de la indemnización base "
+            f"(art. 14.2.a Ley 24.557, $ {d['indemnizacion_base']:,.2f}) con más el adicional del "
+            f"20% (art. 3 Ley 26.773, $ {d['adicional_art3']:,.2f})"
+        )
+        if d["aplica_piso"]:
+            texto += f", aplicándose el piso legal vigente ({d['piso_norma']})."
+        else:
+            texto += "."
+        return texto
+
     def generar_excel(self, buffer=None):
         """Genera planilla Excel con la liquidación LRT. Implementado en Fase 4."""
         if buffer:

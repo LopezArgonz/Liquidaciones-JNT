@@ -4,7 +4,15 @@ import pandas as pd
 from datetime import date, datetime
 from dateutil.relativedelta import relativedelta
 from app_lrt import CalculadoraLRT, cargar_ripte_seed, cargar_pisos
-from utils import aplicar_estilos, aplicar_estilos_tabla, mostrar_footer
+from utils import (
+    aplicar_estilos, aplicar_estilos_tabla, mostrar_footer, sanitizar_nombre,
+    encabezado_institucional, tarjeta_metrica, chip_norma, sello_fuente,
+    caja_monto_letras, alerta, monto_en_letras,
+)
+
+# Enlaces oficiales InfoLEG
+LEY_24557 = "https://servicios.infoleg.gob.ar/infolegInternet/verNorma.do?id=27971"
+LEY_26773 = "https://servicios.infoleg.gob.ar/infolegInternet/verNorma.do?id=203798"
 
 st.set_page_config(
     page_title="Riesgos del Trabajo - Liquidaciones JNT",
@@ -26,177 +34,172 @@ def _cargar_ripte_inicial():
 def main():
     _cargar_ripte_inicial()
 
-    st.markdown("""
-        <div style="display: inline-block;">
-            <h1 style="margin: 0; padding: 0; font-size: 3rem;">⚕️ Calculadora LRT (Ley 24.557)</h1>
-            <h3 style="margin: 0; padding: 0; color: #555; font-weight: normal;">
-                Prestación Dineraria por Incapacidad Permanente Parcial
-            </h3>
-        </div>
-        """, unsafe_allow_html=True)
-    st.markdown("---")
+    encabezado_institucional(
+        "Riesgos del Trabajo",
+        "Ley 24.557 · art. 3 Ley 26.773 — Prestación Dineraria por Incapacidad Permanente Parcial",
+    )
+    st.markdown(
+        chip_norma("Ley 24.557 (InfoLEG)", LEY_24557) + " " + chip_norma("Ley 26.773 (InfoLEG)", LEY_26773),
+        unsafe_allow_html=True,
+    )
 
-    # ── SIDEBAR ──────────────────────────────────────────────────────────────
+    # ── SIDEBAR: EXPEDIENTE POR PASOS ─────────────────────────────────────────
     with st.sidebar:
-        st.header("📋 Datos del Caso")
-
         if st.button("Nueva Liquidación LRT", type="primary", use_container_width=True):
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
             st.rerun()
 
-        caratula = st.text_input(
-            "Carátula / Expediente", value="",
-            placeholder="Ej: García c/ Empresa S.A. s/ Accidente",
-            key="lrt_caratula"
-        )
-
-        st.markdown("##### Datos Personales y del Accidente")
-
-        f_nacimiento = st.date_input(
-            "Fecha de Nacimiento", value=date(1970, 1, 1),
-            min_value=date(1900, 1, 1), max_value=date.today(),
-            format="DD/MM/YYYY", key="lrt_f_nac"
-        )
-        f_accidente = st.date_input(
-            "Fecha del Accidente", value=date.today(),
-            min_value=date(1950, 1, 1), max_value=date(2100, 12, 31),
-            format="DD/MM/YYYY", key="lrt_f_acc"
-        )
-        f_sentencia = st.date_input(
-            "Fecha de Sentencia / Liquidación", value=date.today(),
-            min_value=date(1950, 1, 1), max_value=date(2100, 12, 31),
-            format="DD/MM/YYYY", key="lrt_f_sent"
-        )
-        incapacidad = st.number_input(
-            "% Incapacidad", min_value=0.0, max_value=100.0,
-            value=0.0, step=0.01, format="%.2f", key="lrt_incap"
-        )
-        if incapacidad >= 66.0:
-            st.warning(
-                "Incapacidad >= 66%: verificar si corresponde art. 14.2.b "
-                "(Gran Invalidez). Este módulo calcula solo IPP."
+        with st.expander("I · Expediente y trabajador", expanded=True):
+            caratula = st.text_input(
+                "Carátula / Expediente", value="",
+                placeholder="Ej: García c/ Empresa S.A. s/ Accidente",
+                key="lrt_caratula"
+            )
+            f_nacimiento = st.date_input(
+                "Fecha de Nacimiento", value=date(1970, 1, 1),
+                min_value=date(1900, 1, 1), max_value=date.today(),
+                format="DD/MM/YYYY", key="lrt_f_nac"
+            )
+            f_accidente = st.date_input(
+                "Fecha del Accidente", value=date.today(),
+                min_value=date(1950, 1, 1), max_value=date(2100, 12, 31),
+                format="DD/MM/YYYY", key="lrt_f_acc"
+            )
+            f_sentencia = st.date_input(
+                "Fecha de Sentencia / Liquidación", value=date.today(),
+                min_value=date(1950, 1, 1), max_value=date(2100, 12, 31),
+                format="DD/MM/YYYY", key="lrt_f_sent"
             )
 
-        st.markdown("##### Modo de Cálculo del IBM")
-        modo = st.radio(
-            "Ingresar IBM como:",
-            ["IBM Directo (Modo A)", "Promedio de Salarios (Modo B)"],
-            key="lrt_modo",
-            help=(
-                "**Modo A:** usar cuando el IBM (Ingreso Base Mensual) ya fue determinado "
-                "judicialmente o consta en la pericia contable como un valor único. "
-                "Se actualiza por RIPTE entre accidente y sentencia.\n\n"
-                "**Modo B:** usar cuando se reconstruye el IBM desde los 12 salarios del "
-                "año previo al accidente. Cada salario se actualiza por RIPTE hasta el mes "
-                "del accidente y luego se promedian."
+        with st.expander("II · Incapacidad", expanded=False):
+            incapacidad = st.number_input(
+                "% Incapacidad", min_value=0.0, max_value=100.0,
+                value=0.0, step=0.01, format="%.2f", key="lrt_incap"
             )
-        )
-
-        ibm_historico = None
-        salarios = None
-
-        if modo == "IBM Directo (Modo A)":
-            ibm_historico = st.number_input(
-                "IBM Histórico ($)", min_value=0.0, value=0.0,
-                step=100.0, format="%.2f", key="lrt_ibm"
-            )
-        else:
-            st.markdown("Ingresar los 12 salarios del año previo al accidente:")
-
-            col_pi, col_btn = st.columns([3, 2])
-            with col_pi:
-                periodo_inicial = st.text_input(
-                    "Período inicial (MM/AAAA)",
-                    placeholder="Ej: 07/2014",
-                    key="lrt_periodo_inicial"
+            if incapacidad >= 66.0:
+                alerta(
+                    "Incapacidad ≥ 66%: verificar si corresponde art. 14.2.b "
+                    "(Gran Invalidez). Este módulo calcula solo IPP."
                 )
-            with col_btn:
-                st.markdown("<div style='margin-top:28px'></div>", unsafe_allow_html=True)
-                if st.button("Completar 12 períodos", key="lrt_btn_completar"):
-                    try:
-                        mes0 = datetime.strptime(periodo_inicial.strip(), "%m/%Y")
-                        periodos = [(mes0 + relativedelta(months=i)).strftime("%m/%Y") for i in range(12)]
-                        st.session_state["lrt_salarios_data"] = pd.DataFrame({
-                            "Período (MM/AAAA)": periodos,
-                            "Importe ($)": [0.0] * 12,
-                        })
-                        st.session_state["lrt_sal_v"] = st.session_state.get("lrt_sal_v", 0) + 1
-                    except ValueError:
-                        st.error("Formato inválido. Use MM/AAAA (ej: 07/2014)")
 
-            sal_v = st.session_state.get("lrt_sal_v", 0)
-            df_inicial = st.session_state.get("lrt_salarios_data", pd.DataFrame({
-                "Período (MM/AAAA)": [""] * 12,
-                "Importe ($)": [0.0] * 12,
-            }))
-            edited_sal = st.data_editor(
-                df_inicial,
-                num_rows="fixed",
-                use_container_width=True,
-                key=f"lrt_salarios_{sal_v}",
-                column_config={
-                    "Período (MM/AAAA)": st.column_config.TextColumn(
-                        "Período (MM/AAAA)", help="Formato: MM/AAAA, ej: 06/2015"
-                    ),
-                    "Importe ($)": st.column_config.NumberColumn(
-                        "Importe ($)", format="%.2f", min_value=0.0
-                    ),
-                },
-            )
-            salarios_raw = []
-            for _, row in edited_sal.iterrows():
-                periodo = str(row["Período (MM/AAAA)"]).strip()
-                importe = float(row["Importe ($)"])
-                if periodo and importe > 0:
-                    salarios_raw.append({"periodo": periodo, "importe": importe})
-            salarios = salarios_raw if salarios_raw else None
-
-        st.markdown("---")
-        st.markdown("##### Índice RIPTE")
-
-        ripte_serie_actual = st.session_state.get("lrt_ripte_serie", {})
-        n_periodos = len(ripte_serie_actual)
-        ultimo_periodo = max(ripte_serie_actual.keys()) if ripte_serie_actual else "N/D"
-        try:
-            ultimo_display = datetime.strptime(ultimo_periodo, "%Y-%m-%d").strftime("%m/%Y")
-        except ValueError:
-            ultimo_display = ultimo_periodo
-        st.caption(f"Serie cargada: {n_periodos} períodos. Último: {ultimo_display}.")
-
-        with st.expander("Agregar períodos RIPTE"):
-            st.caption(
-                "Fuente oficial: cuadro SRT en "
-                "https://www.argentina.gob.ar/trabajo/seguridadsocial/ripte  "
-                "— usar la columna **'Índice No Decreciente Base 07/94 = 100'**."
-            )
-            col_rp, col_rv = st.columns(2)
-            with col_rp:
-                nuevo_periodo = st.text_input(
-                    "Período (MM/AAAA)", placeholder="Ej: 03/2026",
-                    key="lrt_ripte_nuevo_periodo"
+        with st.expander("III · IBM", expanded=False):
+            modo = st.radio(
+                "Ingresar IBM como:",
+                ["IBM Directo (Modo A)", "Promedio de Salarios (Modo B)"],
+                key="lrt_modo",
+                help=(
+                    "**Modo A:** usar cuando el IBM (Ingreso Base Mensual) ya fue determinado "
+                    "judicialmente o consta en la pericia contable como un valor único. "
+                    "Se actualiza por RIPTE entre accidente y sentencia.\n\n"
+                    "**Modo B:** usar cuando se reconstruye el IBM desde los 12 salarios del "
+                    "año previo al accidente. Cada salario se actualiza por RIPTE hasta el mes "
+                    "del accidente y luego se promedian."
                 )
-            with col_rv:
-                nuevo_valor = st.number_input(
-                    "Índice No Decreciente", min_value=0.0, value=0.0,
-                    format="%.2f", key="lrt_ripte_nuevo_valor"
-                )
-            if st.button("Agregar período", key="lrt_btn_agregar_ripte"):
-                if nuevo_periodo and nuevo_valor > 0:
-                    try:
-                        mes = datetime.strptime(nuevo_periodo.strip(), "%m/%Y")
-                        clave = mes.strftime("%Y-%m-01")
-                        serie = dict(st.session_state["lrt_ripte_serie"])
-                        serie[clave] = nuevo_valor
-                        st.session_state["lrt_ripte_serie"] = serie
-                        st.success(f"Período {nuevo_periodo} agregado (índice: {nuevo_valor:,.2f}).")
-                        st.rerun()
-                    except ValueError:
-                        st.error("Formato inválido. Use MM/AAAA (ej: 03/2026)")
-                else:
-                    st.warning("Complete el período y el valor antes de agregar.")
+            )
 
-        st.markdown("---")
+            ibm_historico = None
+            salarios = None
+
+            if modo == "IBM Directo (Modo A)":
+                ibm_historico = st.number_input(
+                    "IBM Histórico ($)", min_value=0.0, value=0.0,
+                    step=100.0, format="%.2f", key="lrt_ibm"
+                )
+            else:
+                st.markdown("Ingresar los 12 salarios del año previo al accidente:")
+
+                col_pi, col_btn = st.columns([3, 2])
+                with col_pi:
+                    periodo_inicial = st.text_input(
+                        "Período inicial (MM/AAAA)",
+                        placeholder="Ej: 07/2014",
+                        key="lrt_periodo_inicial"
+                    )
+                with col_btn:
+                    st.markdown("<div style='margin-top:28px'></div>", unsafe_allow_html=True)
+                    if st.button("Completar 12 períodos", key="lrt_btn_completar"):
+                        try:
+                            mes0 = datetime.strptime(periodo_inicial.strip(), "%m/%Y")
+                            periodos = [(mes0 + relativedelta(months=i)).strftime("%m/%Y") for i in range(12)]
+                            st.session_state["lrt_salarios_data"] = pd.DataFrame({
+                                "Período (MM/AAAA)": periodos,
+                                "Importe ($)": [0.0] * 12,
+                            })
+                            st.session_state["lrt_sal_v"] = st.session_state.get("lrt_sal_v", 0) + 1
+                        except ValueError:
+                            alerta("Formato inválido. Use MM/AAAA (ej: 07/2014)")
+
+                sal_v = st.session_state.get("lrt_sal_v", 0)
+                df_inicial = st.session_state.get("lrt_salarios_data", pd.DataFrame({
+                    "Período (MM/AAAA)": [""] * 12,
+                    "Importe ($)": [0.0] * 12,
+                }))
+                edited_sal = st.data_editor(
+                    df_inicial,
+                    num_rows="fixed",
+                    use_container_width=True,
+                    key=f"lrt_salarios_{sal_v}",
+                    column_config={
+                        "Período (MM/AAAA)": st.column_config.TextColumn(
+                            "Período (MM/AAAA)", help="Formato: MM/AAAA, ej: 06/2015"
+                        ),
+                        "Importe ($)": st.column_config.NumberColumn(
+                            "Importe ($)", format="%.2f", min_value=0.0
+                        ),
+                    },
+                )
+                salarios_raw = []
+                for _, row in edited_sal.iterrows():
+                    periodo = str(row["Período (MM/AAAA)"]).strip()
+                    importe = float(row["Importe ($)"])
+                    if periodo and importe > 0:
+                        salarios_raw.append({"periodo": periodo, "importe": importe})
+                salarios = salarios_raw if salarios_raw else None
+
+        with st.expander("IV · Índice RIPTE", expanded=False):
+            ripte_serie_actual = st.session_state.get("lrt_ripte_serie", {})
+            n_periodos = len(ripte_serie_actual)
+            ultimo_periodo = max(ripte_serie_actual.keys()) if ripte_serie_actual else "N/D"
+            try:
+                ultimo_display = datetime.strptime(ultimo_periodo, "%Y-%m-%d").strftime("%m/%Y")
+            except ValueError:
+                ultimo_display = ultimo_periodo
+
+            sello_fuente(f"RIPTE — SRT — ÍNDICE NO DECRECIENTE BASE 07/94 · {n_periodos} períodos, último {ultimo_display}")
+
+            with st.expander("Agregar períodos RIPTE"):
+                st.caption(
+                    "Fuente oficial: cuadro SRT en "
+                    "https://www.argentina.gob.ar/trabajo/seguridadsocial/ripte  "
+                    "— usar la columna **'Índice No Decreciente Base 07/94 = 100'**."
+                )
+                col_rp, col_rv = st.columns(2)
+                with col_rp:
+                    nuevo_periodo = st.text_input(
+                        "Período (MM/AAAA)", placeholder="Ej: 03/2026",
+                        key="lrt_ripte_nuevo_periodo"
+                    )
+                with col_rv:
+                    nuevo_valor = st.number_input(
+                        "Índice No Decreciente", min_value=0.0, value=0.0,
+                        format="%.2f", key="lrt_ripte_nuevo_valor"
+                    )
+                if st.button("Agregar período", key="lrt_btn_agregar_ripte"):
+                    if nuevo_periodo and nuevo_valor > 0:
+                        try:
+                            mes = datetime.strptime(nuevo_periodo.strip(), "%m/%Y")
+                            clave = mes.strftime("%Y-%m-01")
+                            serie = dict(st.session_state["lrt_ripte_serie"])
+                            serie[clave] = nuevo_valor
+                            st.session_state["lrt_ripte_serie"] = serie
+                            st.success(f"Período {nuevo_periodo} agregado (índice: {nuevo_valor:,.2f}).")
+                            st.rerun()
+                        except ValueError:
+                            alerta("Formato inválido. Use MM/AAAA (ej: 03/2026)")
+                    else:
+                        alerta("Complete el período y el valor antes de agregar.")
+
         mostrar_footer()
 
     # ── LÓGICA DE CÁLCULO ────────────────────────────────────────────────────
@@ -219,8 +222,8 @@ def main():
 
     if listo_b_parcial and not listo_b:
         n_sal = len(salarios)
-        st.warning(
-            f"⚠️ Se ingresaron {n_sal} salario{'s' if n_sal != 1 else ''} con importe mayor a cero. "
+        alerta(
+            f"Se ingresaron {n_sal} salario{'s' if n_sal != 1 else ''} con importe mayor a cero. "
             f"Se requieren exactamente 12 para calcular el IBM promedio."
         )
         return
@@ -254,12 +257,20 @@ def main():
         # ── MÉTRICAS RÁPIDAS ─────────────────────────────────────────────────
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.info(f"**Edad al accidente:** {d['edad']} años")
+            tarjeta_metrica("Edad al accidente", f"{d['edad']} años")
         with col2:
-            aplica_txt = "PISO LEGAL" if d["aplica_piso"] else "SUBTOTAL LRT"
-            st.warning(f"**Aplica:** {aplica_txt}")
+            tarjeta_metrica("Coef. RIPTE", f"{d['coef_ripte']:.4f}")
         with col3:
-            st.success(f"**Capital Final:** ${d['capital_final']:,.2f}")
+            tarjeta_metrica("Capital Final", f"${d['capital_final']:,.2f}", tono="exito")
+
+        if d["aplica_piso"]:
+            st.markdown(
+                f"Se aplica el **piso legal**: {chip_norma(d['piso_norma'])}",
+                unsafe_allow_html=True,
+            )
+
+        # ── MONTO EN LETRAS ───────────────────────────────────────────────────
+        caja_monto_letras(monto_en_letras(d["capital_final"]))
 
         # ── DESGLOSE ─────────────────────────────────────────────────────────
         st.subheader("Desglose de la Liquidación")
@@ -281,10 +292,10 @@ def main():
                 min_hist = min(r["historico"] for r in detalle)
 
                 if ibm_acc < min_hist:
-                    st.error(
+                    alerta(
                         f"El IBM calculado (${ibm_acc:,.2f}) es menor al salario histórico más bajo "
                         f"(${min_hist:,.2f}). Verificá que los importes estén ingresados en pesos "
-                        f"con **punto como separador decimal** (ej.: 11894.28, no 11.894,28)."
+                        f"con punto como separador decimal (ej.: 11894.28, no 11.894,28)."
                     )
 
                 filas_sal = [
@@ -343,25 +354,33 @@ def main():
             html = df_tabla.to_html(index=False, classes="table-jnt", border=0, justify="center")
             st.markdown(html, unsafe_allow_html=True)
 
-        # ── DESCARGA EXCEL ───────────────────────────────────────────────────
-        st.markdown("### 📥 Exportar Liquidación LRT")
+        # ── TEXTO PARA LA SENTENCIA ────────────────────────────────────────
+        st.subheader("Texto para la sentencia")
+        st.text_area(
+            "Listo para copiar al proyecto de sentencia",
+            value=calc.texto_sentencia(),
+            height=160,
+            disabled=True,
+        )
+
+        # ── EXPORTACIÓN ────────────────────────────────────────────────────
+        st.subheader("Exportar Liquidación LRT")
         excel_buffer = io.BytesIO()
         calc.generar_excel(buffer=excel_buffer)
         excel_data = excel_buffer.getvalue()
 
-        nombre = (caratula or "LRT").replace(" ", "_")
         st.download_button(
-            label="📄 Descargar Excel",
+            label="Descargar Excel",
             data=excel_data,
-            file_name=f"LRT_{nombre}.xlsx",
+            file_name=f"LRT_{sanitizar_nombre(caratula or 'LRT')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
     except ValueError as e:
-        st.error(f"Error de validación: {e}")
+        alerta(f"Error de validación: {e}")
         st.caption("Verifique que las fechas tengan índice RIPTE disponible y que los datos sean correctos.")
     except Exception as e:
-        st.error(f"Error en el cálculo: {e}")
+        alerta(f"Error en el cálculo: {e}")
         st.caption("Verifique las fechas, el índice RIPTE y los datos ingresados.")
 
 
