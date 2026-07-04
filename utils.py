@@ -182,6 +182,67 @@ footer { visibility: hidden; }
     margin: 0.4rem 0;
 }
 
+/* ── Tarjeta de login (mesa de entradas) ────────────────────────────── */
+.jnt-login-card {
+    max-width: 440px;
+    margin: 2rem auto 1.5rem auto;
+    text-align: center;
+    padding: 2rem 1.5rem 1.5rem 1.5rem;
+    background: var(--jnt-marfil);
+    border: 2px solid var(--jnt-azul);
+    outline: 1px solid var(--jnt-dorado);
+    outline-offset: -6px;
+    border-radius: 6px;
+}
+.jnt-login-icono { color: var(--jnt-dorado); margin-bottom: 0.4rem; }
+.jnt-login-titulo { font-size: 1.6rem !important; margin: 0.25rem 0 !important; }
+.jnt-login-leyenda {
+    font-size: 0.72rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--jnt-azul-claro);
+    margin-top: 0.25rem;
+}
+
+/* ── Tarjetas-herramienta (portada) ─────────────────────────────────── */
+.jnt-tarjeta-herr {
+    position: relative;
+    border: 1px solid var(--jnt-borde);
+    border-radius: 6px;
+    padding: 1.9rem 1.25rem 1.25rem 1.25rem;
+    background: var(--jnt-marfil);
+    text-align: center;
+    transition: box-shadow 0.2s ease, transform 0.2s ease;
+    margin-bottom: 0.5rem;
+}
+.jnt-tarjeta-herr:hover {
+    box-shadow: 0 6px 16px rgba(31, 42, 56, 0.15);
+    transform: translateY(-2px);
+}
+.jnt-tarjeta-etiqueta {
+    position: absolute;
+    top: -0.6rem;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--jnt-dorado);
+    color: var(--jnt-azul);
+    font-size: 0.65rem;
+    letter-spacing: 0.1em;
+    padding: 0.15rem 0.7rem;
+    border-radius: 3px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+.jnt-tarjeta-icono { color: var(--jnt-azul); margin: 0.5rem 0; }
+.jnt-tarjeta-titulo {
+    font-family: var(--jnt-serif);
+    font-size: 1.2rem;
+    color: var(--jnt-azul);
+    font-weight: 600;
+    margin-bottom: 0.3rem;
+}
+.jnt-tarjeta-desc { font-size: 0.85rem; color: var(--jnt-azul-claro); }
+
 /* ── Impresión ──────────────────────────────────────────────────────── */
 @media print {
     [data-testid="stSidebar"], [data-testid="stHeader"],
