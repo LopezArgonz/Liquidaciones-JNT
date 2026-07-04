@@ -7,9 +7,16 @@ import json
 import requests
 import io
 
-from utils import sanitizar_nombre
+from utils import sanitizar_nombre, monto_en_letras, VERSION
 
 SERIE_ID_IPC = "145.3_INGNACNAL_DICI_M_15"  # IPC INDEC Nacional (Base 2016)
+
+SECCION_LABELS = {
+    "indemnizatorios": "§ RUBROS INDEMNIZATORIOS",
+    "salariales": "§ RUBROS SALARIALES",
+    "multas": "§ MULTAS E INCREMENTOS",
+    "adicionales": "§ ADICIONALES",
+}
 
 
 @lru_cache(maxsize=1)
@@ -320,14 +327,27 @@ class LiquidadorLaboral:
             
         workbook = writer.book
         ws = workbook.add_worksheet('Liquidación')
-        
-        fmt_tit = workbook.add_format({'bold': True, 'bg_color': '#2F5597', 'font_color': 'white', 'border': 1, 'align': 'center'})
+
+        AZUL, MARFIL, DORADO, MARFIL_OSCURO = '#1F2A38', '#FAF8F3', '#B8860B', '#EFEBE2'
+
+        fmt_titulo_doc = workbook.add_format({'bold': True, 'bg_color': AZUL, 'font_color': MARFIL,
+                                              'align': 'center', 'valign': 'vcenter', 'font_size': 14})
+        fmt_tit = workbook.add_format({'bold': True, 'bg_color': AZUL, 'font_color': MARFIL, 'border': 1, 'align': 'center'})
         fmt_mon = workbook.add_format({'num_format': '$#,##0.00', 'border': 1})
         fmt_txt = workbook.add_format({'border': 1})
         fmt_bold = workbook.add_format({'bold': True, 'border': 1})
-        fmt_int = workbook.add_format({'bold': True, 'bg_color': '#EBF1DE', 'border': 1, 'num_format': '$#,##0.00'})
+        fmt_int = workbook.add_format({'bold': True, 'bg_color': MARFIL_OSCURO, 'border': 1, 'num_format': '$#,##0.00'})
+        fmt_seccion = workbook.add_format({'bold': True, 'bg_color': MARFIL_OSCURO, 'font_color': AZUL,
+                                           'italic': True, 'border': 1})
+        fmt_total = workbook.add_format({'bold': True, 'bg_color': MARFIL_OSCURO, 'border': 1,
+                                         'top': 6, 'num_format': '$#,##0.00'})
+        fmt_num4 = workbook.add_format({'num_format': '0.0000', 'border': 1})
+        fmt_letras = workbook.add_format({'italic': True, 'border': 1, 'bg_color': MARFIL, 'valign': 'vcenter'})
 
-        ws.set_column('A:A', 55); ws.set_column('B:B', 25)
+        ws.set_column('A:A', 58); ws.set_column('B:B', 25)
+
+        ws.merge_range('A1:B1', f"JUSTICIA NACIONAL DEL TRABAJO — LIQUIDACIÓN — {self.caratula}", fmt_titulo_doc)
+        ws.set_row(0, 22)
 
         antiguedad = relativedelta(self.despido, self.ingreso)
         ant_str = f"{antiguedad.years} años, {antiguedad.months} meses"
@@ -335,17 +355,18 @@ class LiquidadorLaboral:
         label_ipc_ini = f"IPC Inicio ({fecha_ipc_ini})" if fecha_ipc_ini else "IPC Inicio (mes despido)"
         label_ipc_fin = f"IPC Cierre ({fecha_ipc_fin})" if fecha_ipc_fin else "IPC Cierre (liquidación)"
 
-        ws.write('A1', 'EXPEDIENTE:', fmt_bold);          ws.write('B1', self.caratula, fmt_txt)
-        ws.write('A2', 'FECHA DE INGRESO:', fmt_bold);    ws.write('B2', self.ingreso.strftime("%d/%m/%Y"), fmt_txt)
-        ws.write('A3', 'FECHA DE DESPIDO:', fmt_bold);    ws.write('B3', self.despido.strftime("%d/%m/%Y"), fmt_txt)
-        ws.write('A4', 'ANTIGÜEDAD:', fmt_bold);          ws.write('B4', ant_str, fmt_txt)
-        ws.write('A5', 'MEJOR REMUNERACIÓN:', fmt_bold);  ws.write('B5', self.sueldo, fmt_mon)
-        ws.write('A6', 'FECHA DE LIQUIDACIÓN:', fmt_bold); ws.write('B6', self.hoy.strftime("%d/%m/%Y"), fmt_txt)
-        ws.write('A7', label_ipc_ini + ':', fmt_bold);   ws.write('B7', self.ipc_inicio, workbook.add_format({'num_format': '0.0000', 'border': 1}))
-        ws.write('A8', label_ipc_fin + ':', fmt_bold);   ws.write('B8', self.ipc_fin, workbook.add_format({'num_format': '0.0000', 'border': 1}))
-        ws.write('A9', 'MÉTODO ACTUALIZACIÓN:', fmt_bold); ws.write('B9', "IPC INDEC + 3% Anual", fmt_txt)
+        ws.write('A3', 'EXPEDIENTE:', fmt_bold);          ws.write('B3', self.caratula, fmt_txt)
+        ws.write('A4', 'FECHA DE INGRESO:', fmt_bold);    ws.write('B4', self.ingreso.strftime("%d/%m/%Y"), fmt_txt)
+        ws.write('A5', 'FECHA DE DESPIDO:', fmt_bold);    ws.write('B5', self.despido.strftime("%d/%m/%Y"), fmt_txt)
+        ws.write('A6', 'ANTIGÜEDAD:', fmt_bold);          ws.write('B6', ant_str, fmt_txt)
+        ws.write('A7', 'MEJOR REMUNERACIÓN:', fmt_bold);  ws.write('B7', self.sueldo, fmt_mon)
+        ws.write('A8', 'FECHA DE LIQUIDACIÓN:', fmt_bold); ws.write('B8', self.hoy.strftime("%d/%m/%Y"), fmt_txt)
+        ws.write('A9', label_ipc_ini + ':', fmt_bold);   ws.write('B9', self.ipc_inicio, fmt_num4)
+        ws.write('A10', label_ipc_fin + ':', fmt_bold);   ws.write('B10', self.ipc_fin, fmt_num4)
+        ws.write('A11', 'MÉTODO ACTUALIZACIÓN:', fmt_bold); ws.write('B11', "IPC INDEC + 3% Anual", fmt_txt)
 
-        ws.write('A11', 'RUBRO', fmt_tit); ws.write('B11', 'MONTO', fmt_tit)
+        row_header = 13  # 0-indexed -> fila 14
+        ws.write(row_header, 0, 'RUBRO', fmt_tit); ws.write(row_header, 1, 'MONTO', fmt_tit)
 
         r = self.calcular_rubros()
         total_historico = r["total_historico"]
@@ -356,10 +377,16 @@ class LiquidadorLaboral:
         int_puro = r["interes_puro"]
         porcentaje_acumulado = dias_pasados * (0.03 / 365)
 
-        row = 12
-        for _seccion, lab, mon in r["rubros"]:
-            ws.write(row, 0, lab, fmt_txt); ws.write(row, 1, mon, fmt_mon)
+        row = row_header + 1
+        for seccion in ("indemnizatorios", "salariales", "multas", "adicionales"):
+            items = [(lab, mon) for sec, lab, mon in r["rubros"] if sec == seccion]
+            if not items:
+                continue
+            ws.merge_range(row, 0, row, 1, SECCION_LABELS[seccion], fmt_seccion)
             row += 1
+            for lab, mon in items:
+                ws.write(row, 0, lab, fmt_txt); ws.write(row, 1, mon, fmt_mon)
+                row += 1
 
         # Agregar el total histórico al final de los rubros
         ws.write(row, 0, "Capital Histórico:", fmt_bold); ws.write(row, 1, total_historico, fmt_int)
@@ -375,11 +402,20 @@ class LiquidadorLaboral:
         ws.write(row, 0, "ACTUALIZACIÓN E INTERESES (Fuente: IPC INDEC)", fmt_tit)
         ws.write(row, 1, "", fmt_tit)
 
-        ws.write(row+1, 0, "Coeficiente IPC INDEC:", fmt_txt); ws.write(row+1, 1, coef, workbook.add_format({'num_format': '0.0000', 'border': 1}))
+        ws.write(row+1, 0, "Coeficiente IPC INDEC:", fmt_txt); ws.write(row+1, 1, coef, fmt_num4)
         ws.write(row+2, 0, "CAPITAL ACTUALIZADO (IPC):", fmt_bold); ws.write(row+2, 1, cap_act, fmt_mon)
         ws.write(row+3, 0, f"Interés Puro (3% anual — {dias_pasados} días — {porcentaje_acumulado*100:.2f}% acumulado):", fmt_txt); ws.write(row+3, 1, int_puro, fmt_mon)
-        ws.write(row+5, 0, "TOTAL FINAL (Capital Actualizado + Int. 3%):", fmt_int); ws.write(row+5, 1, cap_act + int_puro, fmt_int)
+        ws.write(row+5, 0, "TOTAL FINAL (Capital Actualizado + Int. 3%):", fmt_total); ws.write(row+5, 1, cap_act + int_puro, fmt_total)
         ws.write(row+6, 0, "TOPE MÍNIMO (67% s/ Total Actualizado):", fmt_txt); ws.write(row+6, 1, (cap_act + int_puro) * 0.67, fmt_mon)
+
+        row_letras = row + 8
+        ws.write(row_letras, 0, "MONTO EN LETRAS:", fmt_bold)
+        ws.write(row_letras, 1, monto_en_letras(cap_act + int_puro), fmt_letras)
+
+        ws.freeze_panes(row_header + 1, 0)
+        ws.print_area(0, 0, row_letras, 1)
+        ws.set_footer(f"&LSistema de Liquidaciones JNT v{VERSION}"
+                     f"&RGenerado: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
 
         workbook.close()
         if not buffer:

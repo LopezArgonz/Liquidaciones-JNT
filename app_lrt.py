@@ -6,7 +6,7 @@ import requests
 import pandas as pd
 
 from app_liquidacion import _obtener_serie
-from utils import sanitizar_nombre
+from utils import sanitizar_nombre, monto_en_letras, VERSION
 
 SERIE_ID_RIPTE = "158.1_REPTE_0_0_5"  # RIPTE mensual — Secretaría de Trabajo (datos.gob.ar)
 
@@ -283,17 +283,25 @@ class CalculadoraLRT:
         wb = writer.book
         ws = wb.add_worksheet("Liquidación LRT")
 
-        fmt_tit = wb.add_format({"bold": True, "bg_color": "#2F5597", "font_color": "white", "border": 1, "align": "center"})
+        AZUL, MARFIL, DORADO, MARFIL_OSCURO = "#1F2A38", "#FAF8F3", "#B8860B", "#EFEBE2"
+
+        fmt_titulo_doc = wb.add_format({"bold": True, "bg_color": AZUL, "font_color": MARFIL,
+                                        "align": "center", "valign": "vcenter", "font_size": 14})
+        fmt_tit = wb.add_format({"bold": True, "bg_color": AZUL, "font_color": MARFIL, "border": 1, "align": "center"})
         fmt_mon = wb.add_format({"num_format": "$#,##0.00", "border": 1})
         fmt_txt = wb.add_format({"border": 1})
         fmt_bold = wb.add_format({"bold": True, "border": 1})
-        fmt_tot = wb.add_format({"bold": True, "bg_color": "#EBF1DE", "border": 1, "num_format": "$#,##0.00"})
+        fmt_tot = wb.add_format({"bold": True, "bg_color": MARFIL_OSCURO, "border": 1, "top": 6, "num_format": "$#,##0.00"})
         fmt_num4 = wb.add_format({"num_format": "0.0000", "border": 1})
+        fmt_letras = wb.add_format({"italic": True, "border": 1, "bg_color": MARFIL, "valign": "vcenter"})
 
         ws.set_column("A:A", 58)
         ws.set_column("B:B", 25)
 
         d = self.desglose()
+
+        ws.merge_range("A1:B1", f"JUSTICIA NACIONAL DEL TRABAJO — LIQUIDACIÓN LRT — {self.caratula}", fmt_titulo_doc)
+        ws.set_row(0, 22)
 
         periodo_sent_real = datetime.strptime(d["ripte_sentencia_periodo_real"], "%Y-%m-%d").strftime("%m/%Y")
         label_ripte_sent = (
@@ -302,13 +310,14 @@ class CalculadoraLRT:
             else f"RIPTE mes de sentencia ({periodo_sent_real})"
         )
 
-        ws.write("A1", "EXPEDIENTE:", fmt_bold);          ws.write("B1", self.caratula, fmt_txt)
-        ws.write("A2", "FECHA DE NACIMIENTO:", fmt_bold); ws.write("B2", self.fecha_nacimiento.strftime("%d/%m/%Y"), fmt_txt)
-        ws.write("A3", "FECHA DEL ACCIDENTE:", fmt_bold); ws.write("B3", self.fecha_accidente.strftime("%d/%m/%Y"), fmt_txt)
-        ws.write("A4", "FECHA DE SENTENCIA:", fmt_bold);  ws.write("B4", self.fecha_sentencia.strftime("%d/%m/%Y"), fmt_txt)
-        ws.write("A5", "% INCAPACIDAD:", fmt_bold);       ws.write("B5", f"{self.incapacidad_pct:.2f}%", fmt_txt)
+        ws.write(2, 0, "EXPEDIENTE:", fmt_bold);          ws.write(2, 1, self.caratula, fmt_txt)
+        ws.write(3, 0, "FECHA DE NACIMIENTO:", fmt_bold); ws.write(3, 1, self.fecha_nacimiento.strftime("%d/%m/%Y"), fmt_txt)
+        ws.write(4, 0, "FECHA DEL ACCIDENTE:", fmt_bold); ws.write(4, 1, self.fecha_accidente.strftime("%d/%m/%Y"), fmt_txt)
+        ws.write(5, 0, "FECHA DE SENTENCIA:", fmt_bold);  ws.write(5, 1, self.fecha_sentencia.strftime("%d/%m/%Y"), fmt_txt)
+        ws.write(6, 0, "% INCAPACIDAD:", fmt_bold);       ws.write(6, 1, f"{self.incapacidad_pct:.2f}%", fmt_txt)
 
-        ws.write("A7", "CONCEPTO", fmt_tit); ws.write("B7", "MONTO / VALOR", fmt_tit)
+        row_header = 8
+        ws.write(row_header, 0, "CONCEPTO", fmt_tit); ws.write(row_header, 1, "MONTO / VALOR", fmt_tit)
 
         ibm_inicial = self.ibm_historico if self.ibm_historico is not None else d["ibm_promedio_en_accidente"]
         label_ibm_inicial = "IBM Histórico (ingresado)" if self.ibm_historico is not None else "IBM Promedio al accidente (Modo B)"
@@ -328,7 +337,7 @@ class CalculadoraLRT:
             (f"Piso aplicable ({self.incapacidad_pct:.2f}% del piso)", d["piso_aplicable"]),
         ]
 
-        row = 8
+        row = row_header + 1
         for lab, val in filas:
             ws.write(row, 0, lab, fmt_txt)
             if isinstance(val, int):
@@ -344,6 +353,15 @@ class CalculadoraLRT:
         ws.write(row, 0, f"CAPITAL FINAL (aplica {aplica}):", fmt_bold)
         ws.write(row, 1, d["capital_final"], fmt_tot)
 
+        row_letras = row + 2
+        ws.write(row_letras, 0, "MONTO EN LETRAS:", fmt_bold)
+        ws.write(row_letras, 1, monto_en_letras(d["capital_final"]), fmt_letras)
+
+        ws.freeze_panes(row_header + 1, 0)
+        ws.print_area(0, 0, row_letras, 1)
+        ws.set_footer(f"&LSistema de Liquidaciones JNT v{VERSION}"
+                     f"&RGenerado: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+
         # Hoja de detalle de salarios (solo Modo B)
         if self.ibm_historico is None:
             detalle = self.detalle_salarios_actualizados()
@@ -352,7 +370,7 @@ class CalculadoraLRT:
                 ws2.set_column("A:A", 20)
                 ws2.set_column("B:F", 20)
 
-                fmt_tit2 = wb.add_format({"bold": True, "bg_color": "#2F5597", "font_color": "white",
+                fmt_tit2 = wb.add_format({"bold": True, "bg_color": AZUL, "font_color": MARFIL,
                                           "border": 1, "align": "center"})
                 encabezados = ["Período", "Salario histórico ($)", "RIPTE del mes",
                                "RIPTE al accidente", "Coeficiente", "Salario actualizado ($)"]
