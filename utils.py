@@ -231,6 +231,9 @@ CSS_TABLA = """
     font-size: 0.78rem;
     color: var(--jnt-azul, #1F2A38);
 }
+.table-jnt tbody tr.jnt-seccion td:last-child {
+    text-align: left !important;
+}
 .table-jnt tbody tr:last-child td {
     font-weight: bold;
     background-color: var(--jnt-marfil-oscuro, rgba(128,128,128,0.1));
