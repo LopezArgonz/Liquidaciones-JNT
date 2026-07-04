@@ -1,10 +1,15 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, date
-from dateutil.relativedelta import relativedelta
 import io
-from app_liquidacion import LiquidadorLaboral, obtener_datos_online
-from utils import aplicar_estilos, aplicar_estilos_tabla, mostrar_footer
+from app_liquidacion import LiquidadorLaboral, obtener_datos_online, cargar_ipc_seed
+from utils import aplicar_estilos, aplicar_estilos_tabla, mostrar_footer, sanitizar_nombre
+
+
+@st.cache_data(ttl=3600)
+def _ipc_online_cacheado(fecha_objetivo):
+    """Wrapper cacheado (1h) sobre obtener_datos_online, del lado de la página."""
+    return obtener_datos_online(fecha_objetivo=fecha_objetivo)
 
 st.set_page_config(
     page_title="Liquidaciones JNT",
@@ -174,10 +179,8 @@ def main():
         if st.button("🔄 Actualizar Índices Online"):
             with st.spinner("Consultando API del INDEC..."):
                 try:
-                    val_ini_data = obtener_datos_online(
-                        fecha_objetivo=f_despido.strftime("%d/%m/%Y"))
-                    val_fin_data = obtener_datos_online(
-                        fecha_objetivo=f_liquidacion.strftime("%d/%m/%Y"))
+                    val_ini_data = _ipc_online_cacheado(f_despido.strftime("%d/%m/%Y"))
+                    val_fin_data = _ipc_online_cacheado(f_liquidacion.strftime("%d/%m/%Y"))
                     if val_ini_data and val_fin_data and val_ini_data[0] and val_fin_data[0]:
                         val_ini, fecha_ini_real = val_ini_data
                         val_fin, fecha_fin_real = val_fin_data
@@ -186,12 +189,39 @@ def main():
                         st.session_state["fecha_ipc_ini"] = fecha_ini_real
                         st.session_state["fecha_ipc_fin"] = fecha_fin_real
                         st.session_state["ipc_actualizado"] = True
+                        st.session_state["ipc_fuente"] = "online"
                         st.success(f"IPC obtenido: {fecha_ini_real} → {fecha_fin_real}")
                         st.rerun()
                     else:
-                        st.error("No se pudieron obtener datos para esas fechas.")
-                except Exception as e:
-                    st.error(f"Error de conexión: {e}")
+                        raise RuntimeError("Sin datos de la API para esas fechas.")
+                except Exception:
+                    # Fallback: seed local de IPC (data/ipc_seed.json)
+                    try:
+                        seed = cargar_ipc_seed()
+
+                        def _buscar_en_seed(fecha_objetivo):
+                            clave = fecha_objetivo.strftime("%Y-%m-01")
+                            if clave in seed:
+                                return seed[clave], fecha_objetivo.strftime("%d/%m/%Y")
+                            ultima_clave = max(seed.keys())
+                            return seed[ultima_clave], datetime.strptime(ultima_clave, "%Y-%m-%d").strftime("%d/%m/%Y")
+
+                        val_ini, fecha_ini_real = _buscar_en_seed(f_despido)
+                        val_fin, fecha_fin_real = _buscar_en_seed(f_liquidacion)
+                        st.session_state["ipc_inicio"] = val_ini
+                        st.session_state["ipc_fin"] = val_fin
+                        st.session_state["fecha_ipc_ini"] = fecha_ini_real
+                        st.session_state["fecha_ipc_fin"] = fecha_fin_real
+                        st.session_state["ipc_actualizado"] = True
+                        st.session_state["ipc_fuente"] = "seed"
+                        ultimo_periodo = datetime.strptime(max(seed.keys()), "%Y-%m-%d").strftime("%m/%Y")
+                        st.warning(
+                            f"No se pudo conectar con la API del INDEC. "
+                            f"Fuente: seed local al {ultimo_periodo} — verificar si hay índice más reciente."
+                        )
+                        st.rerun()
+                    except FileNotFoundError:
+                        st.error("No se pudieron obtener datos online ni el seed local de IPC.")
 
         fecha_ipc_ini_label = st.session_state.get("fecha_ipc_ini", "Mes Despido")
         fecha_ipc_fin_label = st.session_state.get("fecha_ipc_fin", "Liquidación")
@@ -260,106 +290,25 @@ def main():
 
         anios = liquidador.antiguedad.years
         meses = liquidador.antiguedad.months
-        periodos = liquidador.calcular_periodos_245()
         base_indem = liquidador.calcular_base_245()
 
-        # ── CONSTRUCCIÓN DE RUBROS ─────────────────────────────────────────
-        rubros = []
-        monto_245 = 0.0
-        monto_preaviso = 0.0
-        monto_integracion = 0.0
+        # ── RUBROS (única fuente de verdad: LiquidadorLaboral.calcular_rubros) ──
+        r = liquidador.calcular_rubros()
+        rubros = [(label, monto) for _seccion, label, monto in r["rubros"]]
+        es_inicio_multas = next(
+            (i for i, (seccion, _, _) in enumerate(r["rubros"]) if seccion == "multas"),
+            len(rubros),
+        )
+        hay_multas = any(seccion == "multas" for seccion, _, _ in r["rubros"])
 
-        if causa == "Sin Causa":
-            monto_245 = base_indem * periodos
-            label_245 = ("Indemnización por antigüedad (art. 245 LCT cfr. tope \"Vizzoti\" CSJN)"
-                         if aplicar_vizzoti
-                         else "Indemnización por antigüedad (art. 245 LCT)")
-            rubros.append((label_245, monto_245))
-
-            meses_preaviso = 2 if anios >= 5 else 1
-            monto_preaviso = sueldo * meses_preaviso
-            rubros.append((f"Indemnización sustitutiva del preaviso (art. 232 LCT) ({meses_preaviso} mes/es)",
-                           monto_preaviso))
-            rubros.append(("SAC sobre preaviso", monto_preaviso / 12))
-
-            monto_integracion = liquidador.calcular_integracion_mes()
-            if monto_integracion > 0:
-                rubros.append(("Integración del mes de despido (art. 233 LCT)", monto_integracion))
-                rubros.append(("SAC sobre integración", monto_integracion / 12))
-
-            if dto34:
-                monto_dto34 = (monto_245 + monto_preaviso + (monto_preaviso / 12)
-                               + monto_integracion + (monto_integracion / 12 if monto_integracion > 0 else 0))
-                rubros.append(("Incremento Indemnizatorio Dto. 34/2019", monto_dto34))
-
-        monto_dias_trab = liquidador.calcular_dias_trabajados_mes_despido()
-        rubros.append((f"Días trabajados mes despido ({f_despido.day} días)", monto_dias_trab))
-
-        sac_ant = liquidador.calcular_sac_semestre_anterior()
-        if sac_ant > 0:
-            rubros.append(("SAC Semestre Anterior Adeudado", sac_ant))
-
-        rubros.append(("SAC Proporcional", liquidador.calcular_sac_prop()))
-
-        vacaciones_prop, vac_dias_ui = liquidador.calcular_vacaciones_prop()
-        rubros.append((f"Vacaciones Proporcionales ({vac_dias_ui:.2f} días)", vacaciones_prop))
-        rubros.append(("SAC s/ vacaciones", vacaciones_prop / 12))
-
-        # Salarios adeudados primero
-        otros_extras_visual = []
-        for c, m in rubros_extras:
-            if "Salarios adeudados" in c:
-                rubros.append((c, m))
-            else:
-                otros_extras_visual.append((c, m))
-
-        # Multas
-        es_inicio_multas = len(rubros)  # índice donde empiezan las multas
-
-        if art1:
-            rubros.append(("Art. 1° Ley 25.323", monto_245))
-        if art2:
-            rubros.append(("Art. 2° Ley 25.323", (monto_245 + monto_preaviso + monto_integracion) * 0.5))
-        if art80:
-            rubros.append(("Multa Art. 80 LCT", sueldo * 3))
-        if art8_24013:
-            total_meses_ui = anios * 12 + meses
-            rubros.append((f"Multa Art. 8° Ley 24.013 ({total_meses_ui} meses)",
-                           (total_meses_ui * sueldo) / 4))
-        if art9_24013 and fecha_registro:
-            periodo_ui_9 = relativedelta(fecha_registro, f_ingreso)
-            meses_ui_9 = periodo_ui_9.years * 12 + periodo_ui_9.months
-            if meses_ui_9 > 0:
-                rubros.append((f"Multa Art. 9° Ley 24.013 ({meses_ui_9} meses)",
-                               (meses_ui_9 * sueldo) / 4))
-        if art10_24013 and remuneracion_no_registrada > 0:
-            f_in = fecha_inicio_art10 if fecha_inicio_art10 else f_ingreso
-            f_out = fecha_fin_art10 if fecha_fin_art10 else f_despido
-            periodo_ui_10 = relativedelta(f_out, f_in)
-            meses_ui_10 = periodo_ui_10.years * 12 + periodo_ui_10.months
-            if meses_ui_10 > 0:
-                rubros.append((f"Multa Art. 10 Ley 24.013 ({meses_ui_10} meses s/ ${remuneracion_no_registrada:,.2f})",
-                               (meses_ui_10 * remuneracion_no_registrada) / 4))
-        if art15_24013:
-            monto_art15_ui = (monto_245 + monto_preaviso + (monto_preaviso / 12)
-                              + monto_integracion + (monto_integracion / 12 if monto_integracion > 0 else 0))
-            rubros.append(("Multa Art. 15 Ley 24.013", monto_art15_ui))
-
-        for c, m in otros_extras_visual:
-            rubros.append((c, m))
-
-        hay_multas = len(rubros) > es_inicio_multas
-
-        total_rubros = sum(m for _, m in rubros)
-        capital_historico_neto = total_rubros - monto_pagos_cuenta
-        total_historico = capital_historico_neto
-
-        coef = ipc_fin / ipc_inicio
-        capital_act = total_historico * coef
-        dias_pasados = max(0, (f_liquidacion - f_despido).days) + 1
-        porcentaje_acumulado = dias_pasados * (0.03 / 365)
-        int_puro = capital_act * porcentaje_acumulado
-        total_final = capital_act + int_puro
+        total_rubros = r["total_historico"]
+        capital_historico_neto = r["capital_neto"]
+        total_historico = r["total_historico"]
+        coef = r["coef"]
+        capital_act = r["capital_actualizado"]
+        dias_pasados = r["dias"]
+        int_puro = r["interes_puro"]
+        total_final = r["total_final"]
 
         # ── MÉTRICAS ──────────────────────────────────────────────────────
         col_res1, col_res2, col_res3 = st.columns(3)
@@ -416,7 +365,7 @@ def main():
         st.download_button(
             label="📄 Descargar Excel Completo",
             data=excel_buffer.getvalue(),
-            file_name=f"Liquidacion_{caratula.replace(' ', '_')}.xlsx",
+            file_name=f"Liquidacion_{sanitizar_nombre(caratula)}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
 

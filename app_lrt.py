@@ -1,5 +1,4 @@
 import json
-import re
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from functools import lru_cache
@@ -7,6 +6,7 @@ import requests
 import pandas as pd
 
 from app_liquidacion import _obtener_serie
+from utils import sanitizar_nombre
 
 SERIE_ID_RIPTE = "158.1_REPTE_0_0_5"  # RIPTE mensual — Secretaría de Trabajo (datos.gob.ar)
 
@@ -257,7 +257,7 @@ class CalculadoraLRT:
         if buffer:
             writer = pd.ExcelWriter(buffer, engine="xlsxwriter")
         else:
-            caratula_limpia = re.sub(r"[^\w\s-]", "_", self.caratula).strip().replace(" ", "_")
+            caratula_limpia = sanitizar_nombre(self.caratula)
             nombre_archivo = f"LRT_{caratula_limpia}.xlsx"
             writer = pd.ExcelWriter(nombre_archivo, engine="xlsxwriter")
 

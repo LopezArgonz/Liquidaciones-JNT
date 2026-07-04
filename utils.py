@@ -1,3 +1,4 @@
+import re
 import streamlit as st
 
 CSS_BASE = """
@@ -84,3 +85,102 @@ def mostrar_footer():
         "</div>",
         unsafe_allow_html=True,
     )
+
+
+def sanitizar_nombre(nombre):
+    """Sanitiza un nombre para usarlo como nombre de archivo (sin espacios ni caracteres especiales)."""
+    return re.sub(r'[^\w\s-]', '_', nombre).strip().replace(' ', '_')
+
+
+_UNIDADES = ["CERO", "UNO", "DOS", "TRES", "CUATRO", "CINCO", "SEIS", "SIETE", "OCHO", "NUEVE",
+             "DIEZ", "ONCE", "DOCE", "TRECE", "CATORCE", "QUINCE", "DIECISÉIS", "DIECISIETE",
+             "DIECIOCHO", "DIECINUEVE", "VEINTE"]
+_DECENA_20 = ["VEINTE", "VEINTIUNO", "VEINTIDÓS", "VEINTITRÉS", "VEINTICUATRO", "VEINTICINCO",
+              "VEINTISÉIS", "VEINTISIETE", "VEINTIOCHO", "VEINTINUEVE"]
+_DECENAS = {3: "TREINTA", 4: "CUARENTA", 5: "CINCUENTA", 6: "SESENTA",
+            7: "SETENTA", 8: "OCHENTA", 9: "NOVENTA"}
+_CENTENAS = ["", "CIENTO", "DOSCIENTOS", "TRESCIENTOS", "CUATROCIENTOS", "QUINIENTOS",
+             "SEISCIENTOS", "SETECIENTOS", "OCHOCIENTOS", "NOVECIENTOS"]
+
+
+def _apocope_uno(texto):
+    """Convierte la terminación 'UNO' en 'UN' (apócope) para preceder MIL/MILLÓN/MILLONES."""
+    if texto == "UNO":
+        return "UN"
+    if texto.endswith("VEINTIUNO"):
+        return texto[: -len("VEINTIUNO")] + "VEINTIÚN"
+    if texto.endswith(" Y UNO"):
+        return texto[: -len(" Y UNO")] + " Y UN"
+    return texto
+
+
+def _decena_a_letras(n):
+    """Convierte un número de 1 a 99 a letras."""
+    if n <= 20:
+        return _UNIDADES[n]
+    if n < 30:
+        return _DECENA_20[n - 20]
+    decena, unidad = divmod(n, 10)
+    texto = _DECENAS[decena]
+    if unidad:
+        texto += " Y " + _UNIDADES[unidad]
+    return texto
+
+
+def _centena_a_letras(n):
+    """Convierte un número de 1 a 999 a letras."""
+    if n == 100:
+        return "CIEN"
+    centena, resto = divmod(n, 100)
+    partes = []
+    if centena:
+        partes.append(_CENTENAS[centena])
+    if resto:
+        partes.append(_decena_a_letras(resto))
+    return " ".join(partes)
+
+
+def _entero_a_letras(n):
+    """Convierte un entero no negativo (hasta 999 miles de millones) a letras."""
+    if n == 0:
+        return "CERO"
+
+    miles_de_millones, resto = divmod(n, 1_000_000_000)
+    millones, resto = divmod(resto, 1_000_000)
+    miles, unidades = divmod(resto, 1000)
+
+    partes = []
+    if miles_de_millones:
+        if miles_de_millones == 1:
+            partes.append("MIL MILLONES")
+        else:
+            partes.append(_apocope_uno(_centena_a_letras(miles_de_millones)) + " MIL MILLONES")
+    if millones:
+        if millones == 1:
+            partes.append("UN MILLÓN")
+        else:
+            partes.append(_apocope_uno(_centena_a_letras(millones)) + " MILLONES")
+    if miles:
+        if miles == 1:
+            partes.append("MIL")
+        else:
+            partes.append(_apocope_uno(_centena_a_letras(miles)) + " MIL")
+    if unidades:
+        partes.append(_centena_a_letras(unidades))
+
+    return " ".join(partes)
+
+
+def monto_en_letras(valor):
+    """
+    Convierte un monto en pesos a letras, estilo sentencia judicial.
+    Ej.: 1_234_567.89 -> "PESOS UN MILLÓN DOSCIENTOS TREINTA Y CUATRO MIL
+    QUINIENTOS SESENTA Y SIETE CON 89/100"
+    """
+    valor = round(float(valor), 2)
+    entero = int(valor)
+    centavos = round((valor - entero) * 100)
+    if centavos == 100:  # corrige el redondeo de punto flotante (p.ej. 99.999999 -> 100)
+        entero += 1
+        centavos = 0
+    return f"PESOS {_entero_a_letras(entero)} CON {centavos:02d}/100"
